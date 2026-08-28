@@ -1,6 +1,8 @@
 # Repoexplorer
 Interactive Shiny dashboard for exploring university open source repositories, contributors, and activity.
 
+Latest deployed version:https://juanis2112-repoexplorer.share.connect.posit.cloud/
+
 ## Simple Shiny app setup
 
 This Shiny app lets you explore repositories and use an OpenAI-powered chat bot over the data.
