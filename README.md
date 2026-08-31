@@ -1,60 +1,35 @@
-# Repoexplorer
-Interactive Shiny dashboard for exploring university open source repositories, contributors, and activity.
+# [oss-orb](https://github.com/oss-slu/oss-orb.git) | [Open Source with SLU](https://oss-slu.github.io)
+## Open Source Repository Browser
+- Building a modern web architecture around the work originally done by the [UC OSPO Network](https://ucospo.net)
 
-Latest deployed version:https://juanis2112-repoexplorer.share.connect.posit.cloud/
+# Tech stack:
+- ## Frontend
+    ### */app*
+    - Typescript
+    - React
+    - Vite
+    - Nginx
+- ## Backend
+    ### */api*
+    - Typescript
+    - NodeJS
+    - Express
 
-## Simple Shiny app setup
+## Project installation/setup
+### 1. Download and install [Docker Desktop](https://www.docker.com/get-started/)
+### 2. Clone the repository & open project locally
+`git clone https://github.com/oss-slu/oss-orb.git`<br>`cd oss-orb`
+### 3. Run project with Docker compose
+The frontend can be served by nginx via the *app* container (production behavior) or with vite's dev server for developers to take advantage of hot reloading.
+- #### Use docker frontend:
+    - Start frontend and backend containers:<br>`docker compose up --build -d`
+    - ***Frontend should now be accessible in your browser via Nginx at http://localhost:8087***
 
-This Shiny app lets you explore repositories and use an OpenAI-powered chat bot over the data.
+- #### Run frontend via vite development server:
+    - First, ensure [Node JS](https://nodejs.org/en) is installed<br>
+    - Run backend container:<br>`docker compose up api --build -d`
+    - Run vite dev server:<br>`cd app && npm ci && npm run dev`<br>
+    - ***Frontend should now be accessible in your browser via Vite at http://localhost:6284***
 
-### 1. Clone the repository
-
-```bash
-git clone <YOUR_REPO_URL>
-cd repoexplorer  
-```
-
-### 2. Install dependencies 
-
-From the project root:
-
-```bash
-pip install -r requirements.txt
-```
-
-The `requirements.txt` file includes `shiny`, `pyarrow`, and `querychat` for the Shiny UI, Parquet data loading, and the chat bot.
-
-### 3. Set up your OpenAI token (for the chat bot)
-
-Set your OpenAI API key as an environment variable (or in a `.env` file):
-
-```bash
-export OPENAI_API_KEY=sk-...
-```
-
-Without this key, the app will still load, but the chat bot will be disabled.
-
-### 4. Download the data
-
-1. Download the Parquet data from [this Google Drive folder](https://drive.google.com/drive/folders/1I7mRHanT7dR2OZgHOL2Se-MSWKsewuwY?usp=sharing).
-2. Place the downloaded files inside the `Data/parquet` folder (create it if it does not exist).
-
-Your layout should look roughly like:
-
-```bash
-repoexplorer/
-├── app.py
-└── Data/
-    └── parquet/
-        └── ...
-```
-
-### 5. Run the app
-
-From the project root, run:
-
-```bash
-shiny run --reload --launch-browser app.py
-```
-
-This will start the app, automatically open a browser window, and reload on code changes. That’s it.
+### 4. Optionally, download the UC OSPO Network Parquet file locally:
+- See instructions in [dev scripts file](/docs/dev/setup_scripts.md)
