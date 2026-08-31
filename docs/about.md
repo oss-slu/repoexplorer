@@ -10,7 +10,7 @@ The goal is simple: make it easier to **see** how open source from academic and 
 
 ### Discovery on GitHub
 
-The underlying dataset is built from **GitHub**. Repositories are collected by **scraping and querying** GitHub for users, organizations, and repositories that match a curated set of institutions and naming patterns. Using **regular expressions**, **university names and acronyms** are matched against GitHub entities (users, organizations, and repositories) to find candidate projects tied to those institutions.
+The underlying dataset is built from **GitHub**. Repositories are collected by **scraping and q[118;1:3uuerying** GitHub for users, organizations, and repositories that match a curated set of institutions and naming patterns. Using **regular expressions**, **university names and acronyms** are matched against GitHub entities (users, organizations, and repositories) to find candidate projects tied to those institutions.
 
 #### Current Data
 
