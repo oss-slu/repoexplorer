@@ -8,9 +8,9 @@ import {
     Tooltip,
 } from 'recharts';
 import { API_URL, PIE_COLORS } from '../../consts';
-import type { pieChartProps, pieSlice } from '../../types/charts';
+import type { chartProps, pieSlice } from '../../types/charts';
 
-export default function PieChartDiv({ title, endpoint }: pieChartProps) {
+export default function PieChartDiv({ title, endpoint }: chartProps) {
     const [data, setData] = useState<{ name: string; value: number }[] | null>(
         null,
     );
