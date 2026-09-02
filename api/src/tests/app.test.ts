@@ -16,7 +16,7 @@ describe('createApp', () => {
         expect(res.headers['access-control-allow-origin']).toBeUndefined();
     });
 
-    it('mounts all expected routes', async () => { 
+    it('mounts all expected routes', async () => {
         const app = createApp();
         ROUTES.forEach(async (r) => {
             const res = await request(app).get(r.route);
