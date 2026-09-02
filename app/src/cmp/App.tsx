@@ -1,4 +1,4 @@
-import PieChartDiv from './charts/PieChart';
+import PieChartDiv from './charts/PieChartDiv';
 
 function App() {
     return (
