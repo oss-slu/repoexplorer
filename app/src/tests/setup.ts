@@ -1,17 +1,20 @@
 import '@testing-library/jest-dom';
 
-vi.stubGlobal('ResizeObserver', class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-});
+vi.stubGlobal(
+    'ResizeObserver',
+    class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+    },
+);
 
 Object.defineProperties(HTMLElement.prototype, {
-    'offsetWidth': {
+    offsetWidth: {
         configurable: true,
         value: 500,
     },
-    'offsetHeight': {
+    offsetHeight: {
         configurable: true,
         value: 500,
     },
