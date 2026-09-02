@@ -17,7 +17,7 @@
         "erasableSyntaxOnly": false,
         "noFallthroughCasesInSwitch": true,
 
-        "types": ["node"]
+        "types": ["node", "jest"]
     },
     "include": ["src"]
 }
