@@ -1,0 +1,21 @@
+name: frontend tests
+on: [push, pull_request]
+
+jobs:
+    format:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - name: checkout
+              uses: actions/checkout@v4
+              with:
+                ref: ${{ github.head_ref }}
+
+            - name: setup node
+              uses: actions/setup-node@v4
+              with:
+                node-version: 24
+
+            - name: run frontend tests
+              run: cd app && npm ci && npm run test:run
