@@ -20,7 +20,7 @@ Object.defineProperties(HTMLElement.prototype, {
     },
 });
 
-Element.prototype.getBoundingClientRect = vi.fn(() => ({
+Element.prototype.getBoundingClientRect = () => ({
     width: 500,
     height: 500,
     top: 0,
@@ -30,4 +30,4 @@ Element.prototype.getBoundingClientRect = vi.fn(() => ({
     x: 0,
     y: 0,
     toJSON: () => {},
-}));
+});
