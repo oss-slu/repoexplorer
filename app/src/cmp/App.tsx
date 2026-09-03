@@ -13,7 +13,10 @@ function App() {
                     title="Project Type Distribution"
                     endpoint="overview/typeDistribution"
                 />
-                <PieChartDiv title="License Distribution" endpoint="overview/licenseDistribution" />
+                <PieChartDiv
+                    title="License Distribution"
+                    endpoint="overview/licenseDistribution"
+                />
             </main>
         </>
     );

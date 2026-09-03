@@ -3,7 +3,7 @@ import type { nameValueArr } from '../types/routes';
 
 // Return summation of all values in rows of field
 export function getSum(rows: parquetData[], field: keyof parquetData): number {
-    let sum: number = 0; 
+    let sum: number = 0;
     for (const row of rows) {
         if (typeof row[field] === 'number') sum += row[field];
     }
@@ -19,7 +19,7 @@ export function getAvg(rows: parquetData[], field: keyof parquetData): number {
 // Return the number of rows where the value in field is not null
 export function getCountFieldNotNull(rows: parquetData[], field: keyof parquetData): number {
     if (rows.length === 0) return 0;
-    return rows.filter(row => row[field] !== null).length;
+    return rows.filter((row) => row[field] !== null).length;
 }
 
 // Return the number of rows where the value of the passed field is not null
@@ -28,14 +28,13 @@ export function getPercentFieldNotNull(rows: parquetData[], field: keyof parquet
     return (getCountFieldNotNull(rows, field) / rows.length) * 100;
 }
 
-
 // Return a nameValueArray with each field and the percent of rows where that field is not null
 export function makeFieldsNotNullArray(rows: parquetData[], fields: (keyof parquetData)[]): nameValueArr {
-    return fields.map(f => ({ name: f, value: getPercentFieldNotNull(rows, f)}));
+    return fields.map((f) => ({ name: f, value: getPercentFieldNotNull(rows, f) }));
 }
 
 // Return count of rows grouped by field. If field is not passed, return total length
-function getCountsByField(rows: parquetData[], field?: keyof parquetData): Record<string, number> { 
+function getCountsByField(rows: parquetData[], field?: keyof parquetData): Record<string, number> {
     if (!field) return { total: rows.length };
 
     const counts: Record<string, number> = {};
@@ -67,9 +66,9 @@ export function makeFieldDistributionArray(rows: parquetData[], field: keyof par
 
 // Return array of distributions of values in field grouped further with by (useful for stacked bar charts)
 export function makeFieldDistributionByArray(rows: parquetData[], field: keyof parquetData, by: keyof parquetData) {
-    const fieldVals = [...new Set(rows.map(row => row[field]))];
-    return fieldVals.map(val => {
-        const fieldData = rows.filter(row => row[field] === val);
+    const fieldVals = [...new Set(rows.map((row) => row[field]))];
+    return fieldVals.map((val) => {
+        const fieldData = rows.filter((row) => row[field] === val);
         const distData = getFieldDistribution(fieldData, by);
         return { name: String(val), ...distData };
     });
