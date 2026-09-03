@@ -1,8 +1,9 @@
 import { Router } from 'express';
-import type { parquetData } from '../types/parquetData';
-import { makeDistributionArray } from '../utils/math';
-import sampleData from '../../data/sample/sampleRepoData.json';
 import { BASE_OVERVIEW } from '../consts';
+import { getAvg, getPercentTrue, getSum, getUniqueCount, makeCountsArray, makeDistributionArray } from '../utils/math';
+import sampleData from '../../data/sample/sampleRepoData.json';
+import type { parquetData } from '../types/parquetData';
+import type { RespOverview } from '../types/routes';
 
 const router = Router();
 
@@ -16,15 +17,20 @@ const distArrays: Record<string, keyof parquetData> = {
 
 router.get(BASE_OVERVIEW, (_req, res) => {
     res.json({
+        totalRepos: getUniqueCount(data),
+        percentWithLicense: getPercentTrue(data, (row) => row.license !== null),
+        totalContributors: getSum(data, 'contributorCount'),
+        avgBusFactor: getAvg(data, 'busFactor'),
+        reposPerUniversity: makeCountsArray(data, 'university'),
         languageDistribution: makeDistributionArray(data, distArrays['langdist']),
         licenseDistribution: makeDistributionArray(data, distArrays['licndist']),
         typeDistribution: makeDistributionArray(data, distArrays['typedist']),
-    });
+    } as RespOverview);
 });
 
 Object.entries(distArrays).forEach(([endpoint, field]) => {
     router.get(`${BASE_OVERVIEW}/${endpoint}`, (_req, res) => {
-        res.json(makeDistributionArray(data, field));
+        res.json(makeDistributionArray(data, field) as RespOverview);
     });
 });
 
