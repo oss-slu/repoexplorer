@@ -3,6 +3,7 @@ export type nameValueArr = nameValue[];
 export type nameMultiVal = { name: string, [key: string]: string | number };
 export type nameMultiValArr = nameMultiVal[];
 
+// /overview route base type
 export type RespOverview = {
     totalRepos?: number,
     percentWithLicense?: number,
@@ -16,3 +17,12 @@ export type RespOverview = {
     languageDistributionByType?: nameMultiValArr,
     licenseDistributionByType?: nameMultiValArr,
 };
+
+// /impact route base type
+export type RespImpact = {};
+
+// /sustainability route base type
+export type RespSustainability = {};
+
+// /security route base type
+export type RespSecurity = {};
