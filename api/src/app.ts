@@ -1,15 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import health from './routes/health';
-import langdist from './routes/langdist';
-import typedist from './routes/typedist';
-import licndist from './routes/licndist';
+import overview from './routes/overview';
 
 export const ROUTES = [
     { router: health, route: '/health' },
-    { router: langdist, route: '/langdist' },
-    { router: typedist, route: '/typedist' },
-    { router: licndist, route: '/licndist' },
+    { router: overview, route: '/overview' },
 ];
 
 export function createApp(origin?: string) {

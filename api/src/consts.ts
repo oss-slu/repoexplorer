@@ -13,3 +13,6 @@ export const PORT = 8765;
 
 // The UC OSPO Network publishes a static parquet file with the Github data at this public S3 bucket.
 export const UCOSPO_PARQ_S3_URL = 'https://repoexplorer-data.s3.amazonaws.com/repositories_reduced_affiliated.parquet';
+
+// overview API route
+export const BASE_OVERVIEW = '/overview';
