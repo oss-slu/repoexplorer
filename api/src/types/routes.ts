@@ -10,4 +10,5 @@ export type RespOverview = {
     languageDistribution?: nameValueArr,
     licenseDistribution?: nameValueArr,
     typeDistribution?: nameValueArr,
+    communityFilesPresence?: nameValueArr,
 };

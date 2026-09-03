@@ -19,10 +19,18 @@ export function getAvg(rows: parquetData[], field: keyof parquetData): number {
     return getSum(rows, field) / rows.length;
 }
 
-export function getPercentTrue(rows: parquetData[], predicate: (row: parquetData) => boolean): number {
+export function getPercentFieldNotNull(rows: parquetData[], field: keyof parquetData): number {
     if (rows.length === 0) return 0;
-    const trueCount = rows.filter(predicate).length;
+    const trueCount = rows.filter(row => row[field] !== null).length;
     return (trueCount / rows.length) * 100;
+}
+
+/* 
+    Accept an array of fields, return a nameValueArray with an entry for each field and the percent of rows where that
+    field is not null
+*/
+export function makeFieldsNotNullArray(rows: parquetData[], fields: (keyof parquetData)[]): nameValueArr {
+    return fields.map(f => ({ name: f, value: getPercentFieldNotNull(rows, f)}));
 }
 
 /*
@@ -30,7 +38,7 @@ export function getPercentTrue(rows: parquetData[], predicate: (row: parquetData
 */ 
 export function getCounts(rows: parquetData[], field?: keyof parquetData): Record<string, number> { 
     if (!field) {
-        return { 'total': rows.length };
+        return { total: rows.length };
     }
     const counts: Record<string, number> = {};
     for (const row of rows) {

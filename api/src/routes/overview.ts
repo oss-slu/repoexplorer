@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { BASE_OVERVIEW } from '../consts';
-import { getAvg, getPercentTrue, getSum, getUniqueCount, makeCountsArray, makeDistributionArray } from '../utils/math';
+import { getAvg, getPercentFieldNotNull, getSum, getUniqueCount, makeCountsArray, makeDistributionArray, makeFieldsNotNullArray } from '../utils/math';
 import sampleData from '../../data/sample/sampleRepoData.json';
 import type { parquetData } from '../types/parquetData';
 import type { RespOverview } from '../types/routes';
@@ -18,13 +18,17 @@ const distArrays: Record<string, keyof parquetData> = {
 router.get(BASE_OVERVIEW, (_req, res) => {
     res.json({
         totalRepos: getUniqueCount(data),
-        percentWithLicense: getPercentTrue(data, (row) => row.license !== null),
+        percentWithLicense: getPercentFieldNotNull(data, 'license'),
         totalContributors: getSum(data, 'contributorCount'),
         avgBusFactor: getAvg(data, 'busFactor'),
         reposPerUniversity: makeCountsArray(data, 'university'),
         languageDistribution: makeDistributionArray(data, distArrays['langdist']),
         licenseDistribution: makeDistributionArray(data, distArrays['licndist']),
         typeDistribution: makeDistributionArray(data, distArrays['typedist']),
+        communityFilesPresence: makeFieldsNotNullArray(data, [
+            'issueTemplates', 'securityPolicy', 'codeOfConductFile',
+            'pullRequestTemplate', 'contributing', 'license', 'description', 'readme',
+        ]),
     } as RespOverview);
 });
 
