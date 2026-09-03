@@ -19,3 +19,11 @@ export function getDistribution(rows: parquetData[], keyFn: (row: parquetData) =
 
     return dist;
 }
+
+/* 
+    Create an array of distributions
+*/
+export function makeDistributionArray(data: parquetData[], field: keyof parquetData) {
+    const distData = getDistribution(data, (row) => row[field] as string);
+    return Object.entries(distData).map(([name, value]) => ({ name, value }));
+}
