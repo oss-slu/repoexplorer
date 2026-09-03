@@ -11,7 +11,7 @@ describe('PieChartDiv', () => {
             'fetch',
             vi.fn(() => new Promise(() => {})),
         );
-        render(<PieChartDiv title="Languages" endpoint="langdist" />);
+        render(<PieChartDiv title="Languages" endpoint="overview/languageDistribution" />);
 
         expect(screen.getByText('Loading Languages...')).toBeInTheDocument();
     });
@@ -31,7 +31,7 @@ describe('PieChartDiv', () => {
             ) as unknown as typeof fetch,
         );
 
-        render(<PieChartDiv title="Languages" endpoint="langdist" />);
+        render(<PieChartDiv title="Languages" endpoint="overview/languageDistribution" />);
 
         await waitFor(() => {
             expect(screen.getByText('Languages')).toBeInTheDocument();
@@ -52,7 +52,7 @@ describe('PieChartDiv', () => {
             ) as unknown as typeof fetch,
         );
 
-        render(<PieChartDiv title="Languages" endpoint="langdist" />);
+        render(<PieChartDiv title="Languages" endpoint="overview/languageDistribution" />);
 
         await waitFor(() => {
             expect(
@@ -68,10 +68,10 @@ describe('PieChartDiv', () => {
         const fetchMock = vi.fn(() => new Promise(() => {}));
         vi.stubGlobal('fetch', fetchMock);
 
-        render(<PieChartDiv title="Languages" endpoint="langdist" />);
+        render(<PieChartDiv title="Languages" endpoint="overview/languageDistribution" />);
 
         expect(fetchMock).toHaveBeenCalledWith(
-            expect.stringContaining('/langdist'),
+            expect.stringContaining('/overview/languageDistribution'),
         );
     });
 });
