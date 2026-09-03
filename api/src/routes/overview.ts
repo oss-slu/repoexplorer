@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { BASE_OVERVIEW } from '../consts';
-import { getAvg, getPercentFieldNotNull, getSum, getUniqueCount, makeCountsArray, makeDistributionArray, makeFieldsNotNullArray } from '../utils/math';
+import { getAvg, getPercentFieldNotNull, getSum, getUniqueCount, makeCountsArray, makeDistributionArray, makeDistributionByArray, makeFieldsNotNullArray } from '../utils/math';
 import sampleData from '../../data/sample/sampleRepoData.json';
 import type { parquetData } from '../types/parquetData';
 import type { RespOverview } from '../types/routes';
@@ -29,6 +29,8 @@ router.get(BASE_OVERVIEW, (_req, res) => {
             'issueTemplates', 'securityPolicy', 'codeOfConductFile',
             'pullRequestTemplate', 'contributing', 'license', 'description', 'readme',
         ]),
+        languageDistributionByType: makeDistributionByArray(data, 'language', 'typePredictionGpt5Mini'),
+        licenseDistributionByType: makeDistributionByArray(data, 'license', 'typePredictionGpt5Mini'),
     } as RespOverview);
 });
 

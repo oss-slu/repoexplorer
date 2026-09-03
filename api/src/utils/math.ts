@@ -52,15 +52,10 @@ export function getCounts(rows: parquetData[], field?: keyof parquetData): Recor
     Calculate distribution of the values in the field passed to keyFn (mostly used for pie charts)
 */
 export function getDistribution(rows: parquetData[], field: keyof parquetData): Record<string, number> {
-    const counts: Record<string, number> = getCounts(rows, field);
-
-    const total = rows.length;
     const dist: Record<string, number> = {};
-
-    for (const [key, count] of Object.entries(counts)) {
-        dist[key] = count / total;
+    for (const [key, count] of Object.entries(getCounts(rows, field))) {
+        dist[key] = count / rows.length;
     }
-
     return dist;
 }
 
@@ -80,6 +75,18 @@ export function makeDistributionArray(data: parquetData[], field: keyof parquetD
 }
 
 /* 
+    Create an array of distributions by another field
+*/
+export function makeDistributionByArray(data: parquetData[], field: keyof parquetData, by: keyof parquetData) {
+    const fieldVals = [...new Set(data.map(row => row[field]))];
+    return fieldVals.map(val => {
+        const fieldData = data.filter(row => row[field] === val);
+        const distData = getDistribution(fieldData, by);
+        return { name: String(val), ...distData };
+    });
+}
+
+/*
     Create an array of counts
 */
 export function makeCountsArray(data: parquetData[], field?: keyof parquetData) {
