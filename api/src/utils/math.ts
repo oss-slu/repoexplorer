@@ -1,11 +1,7 @@
 import type { parquetData } from '../types/parquetData';
 import type { nameValueArr } from '../types/routes';
 
-export function getUniqueCount(rows: parquetData[], field?: keyof parquetData): number {
-    if (!field) return rows.length;
-    return [...new Map(rows.map(row => [row[field], row])).values()].length;
-}
-
+// Return summation of all values in rows of field
 export function getSum(rows: parquetData[], field: keyof parquetData): number {
     let sum: number = 0; 
     for (const row of rows) {
@@ -14,32 +10,34 @@ export function getSum(rows: parquetData[], field: keyof parquetData): number {
     return sum;
 }
 
+// Return average of all values in rows of field
 export function getAvg(rows: parquetData[], field: keyof parquetData): number {
     if (rows.length === 0) return 0;
     return getSum(rows, field) / rows.length;
 }
 
-export function getPercentFieldNotNull(rows: parquetData[], field: keyof parquetData): number {
+// Return the number of rows where the value in field is not null
+export function getCountFieldNotNull(rows: parquetData[], field: keyof parquetData): number {
     if (rows.length === 0) return 0;
-    const trueCount = rows.filter(row => row[field] !== null).length;
-    return (trueCount / rows.length) * 100;
+    return rows.filter(row => row[field] !== null).length;
 }
 
-/* 
-    Accept an array of fields, return a nameValueArray with an entry for each field and the percent of rows where that
-    field is not null
-*/
+// Return the number of rows where the value of the passed field is not null
+export function getPercentFieldNotNull(rows: parquetData[], field: keyof parquetData): number {
+    if (rows.length === 0) return 0;
+    return (getCountFieldNotNull(rows, field) / rows.length) * 100;
+}
+
+
+// Return a nameValueArray with each field and the percent of rows where that field is not null
 export function makeFieldsNotNullArray(rows: parquetData[], fields: (keyof parquetData)[]): nameValueArr {
     return fields.map(f => ({ name: f, value: getPercentFieldNotNull(rows, f)}));
 }
 
-/*
-    Returns count of rows grouped by the passed field. If field is not passed, returns total length
-*/ 
-export function getCounts(rows: parquetData[], field?: keyof parquetData): Record<string, number> { 
-    if (!field) {
-        return { total: rows.length };
-    }
+// Return count of rows grouped by field. If field is not passed, return total length
+function getCountsByField(rows: parquetData[], field?: keyof parquetData): Record<string, number> { 
+    if (!field) return { total: rows.length };
+
     const counts: Record<string, number> = {};
     for (const row of rows) {
         const key = row[field] || 'Unknown';
@@ -48,49 +46,37 @@ export function getCounts(rows: parquetData[], field?: keyof parquetData): Recor
     return counts;
 }
 
-/* 
-    Calculate distribution of the values in the field passed to keyFn (mostly used for pie charts)
-*/
-export function getDistribution(rows: parquetData[], field: keyof parquetData): Record<string, number> {
+// Return the distribution of values in field
+function getFieldDistribution(rows: parquetData[], field: keyof parquetData): Record<string, number> {
     const dist: Record<string, number> = {};
-    for (const [key, count] of Object.entries(getCounts(rows, field))) {
+    for (const [key, count] of Object.entries(getCountsByField(rows, field))) {
         dist[key] = count / rows.length;
     }
     return dist;
 }
 
-/* 
-    Convert map of string, number to nameValueArr type
-*/
-export function makeNameValueArr(data: Record<string, number>): nameValueArr {
+// Convert Record<string, number> to nameValueArr
+function makeNameValueArr(data: Record<string, number>): nameValueArr {
     return Object.entries(data).map(([name, value]) => ({ name, value }));
 }
 
-/* 
-    Create an array of distributions
-*/
-export function makeDistributionArray(data: parquetData[], field: keyof parquetData) {
-    const distData = getDistribution(data, field);
-    return makeNameValueArr(distData);
+// Return array of distributions of values grouped by field
+export function makeFieldDistributionArray(rows: parquetData[], field: keyof parquetData) {
+    return makeNameValueArr(getFieldDistribution(rows, field));
 }
 
-/* 
-    Create an array of distributions by another field
-*/
-export function makeDistributionByArray(data: parquetData[], field: keyof parquetData, by: keyof parquetData) {
-    const fieldVals = [...new Set(data.map(row => row[field]))];
+// Return array of distributions of values in field grouped further with by (useful for stacked bar charts)
+export function makeFieldDistributionByArray(rows: parquetData[], field: keyof parquetData, by: keyof parquetData) {
+    const fieldVals = [...new Set(rows.map(row => row[field]))];
     return fieldVals.map(val => {
-        const fieldData = data.filter(row => row[field] === val);
-        const distData = getDistribution(fieldData, by);
+        const fieldData = rows.filter(row => row[field] === val);
+        const distData = getFieldDistribution(fieldData, by);
         return { name: String(val), ...distData };
     });
 }
 
-/*
-    Create an array of counts
-*/
-export function makeCountsArray(data: parquetData[], field?: keyof parquetData) {
-    const counts = getCounts(data, field);
+// Return array of counts of rows grouped by field
+export function makeCountsArray(rows: parquetData[], field?: keyof parquetData): nameValueArr {
+    const counts = getCountsByField(rows, field);
     return makeNameValueArr(counts);
 }
-

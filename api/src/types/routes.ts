@@ -3,9 +3,13 @@ export type nameValueArr = nameValue[];
 export type nameMultiVal = { name: string, [key: string]: string | number };
 export type nameMultiValArr = nameMultiVal[];
 
+// base API response type for providing data for React/Recharts frontend to ingest
+export type Resp = { [key: string]: number | nameValueArr | nameMultiValArr };
+
 // /overview route base type
 export type RespOverview = {
     totalRepos?: number,
+    withLicense?: number,
     percentWithLicense?: number,
     totalContributors?: number,
     avgBusFactor?: number,
@@ -19,10 +23,10 @@ export type RespOverview = {
 };
 
 // /impact route base type
-export type RespImpact = {};
+export type RespImpact = Resp & {};
 
 // /sustainability route base type
-export type RespSustainability = {};
+export type RespSustainability = Resp & {};
 
 // /security route base type
-export type RespSecurity = {};
+export type RespSecurity = Resp & {};
