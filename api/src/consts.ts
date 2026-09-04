@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { appData } from './types/appData';
 
 // PATHS RELATIVE TO /api
 // consts.ts MUST remain at /api/src/consts.ts for this to work
@@ -14,5 +15,16 @@ export const PORT = 8765;
 // The UC OSPO Network publishes a static parquet file with the Github data at this public S3 bucket.
 export const UCOSPO_PARQ_S3_URL = 'https://repoexplorer-data.s3.amazonaws.com/repositories_reduced_affiliated.parquet';
 
-// overview API route
+// base API routes
 export const BASE_OVERVIEW = '/overview';
+export const BASE_IMPACT = '/impact';
+export const BASE_SUSTAINABILITY = '/sustainability';
+export const BASE_SECURITY = '/security';
+export const BASE_ORGANIZATION = '/organization';
+
+export const FILTERABLE_FIELDS: Partial<Record<keyof appData, 'exact' | 'includes'>> = {
+    university: 'exact',
+    language: 'exact',
+    license: 'exact',
+    typePredictionGpt5Mini: 'exact',
+};
