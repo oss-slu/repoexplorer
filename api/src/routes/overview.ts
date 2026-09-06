@@ -48,11 +48,11 @@ const SUB_ENDPOINTS = {
 
 // Register primary GET response: build and return full RespOverview object
 router.get(BASE_OVERVIEW, (req, res) => {
-    const filtered = filterData(data, req.query)
+    const filtered = filterData(data, req.query);
     res.json(
-        Object.fromEntries(Object.entries(SUB_ENDPOINTS).map(
-            ([endpoint, fn]) => [endpoint, fn(filtered) as RespOverview]
-        )),
+        Object.fromEntries(
+            Object.entries(SUB_ENDPOINTS).map(([endpoint, fn]) => [endpoint, fn(filtered) as RespOverview]),
+        ),
     );
 });
 
