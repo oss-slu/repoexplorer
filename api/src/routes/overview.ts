@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { BASE_OVERVIEW } from '../consts';
 import type { Resp, RespOverview } from '../types/routes';
-import type { parquetData } from '../types/parquetData';
+import type { appData } from '../types/appData';
 import sampleData from '../../data/sample/sampleRepoData.json';
 import {
     getAvg,
@@ -15,21 +15,21 @@ import {
 } from '../utils/math';
 import { filterData } from '../utils/filter';
 
-const data = sampleData as parquetData[];
+const data = sampleData as appData[];
 const router = Router();
 
 // Create endpoint map: the string is the /destination and the function call gets the appropriate data
 const SUB_ENDPOINTS = {
-    totalRepos: (data: parquetData[]) => data.length,
-    withLicense: (data: parquetData[]) => getCountFieldNotNull(data, 'license'),
-    percentWithLicense: (data: parquetData[]) => getPercentFieldNotNull(data, 'license'),
-    totalContributors: (data: parquetData[]) => getSum(data, 'contributorCount'),
-    avgBusFactor: (data: parquetData[]) => getAvg(data, 'busFactor'),
-    reposPerUniversity: (data: parquetData[]) => makeCountsArray(data, 'university'),
-    languageDistribution: (data: parquetData[]) => makeFieldDistributionArray(data, 'language'),
-    licenseDistribution: (data: parquetData[]) => makeFieldDistributionArray(data, 'license'),
-    typeDistribution: (data: parquetData[]) => makeFieldDistributionArray(data, 'typePredictionGpt5Mini'),
-    communityFilesPresence: (data: parquetData[]) =>
+    totalRepos: (data: appData[]) => data.length,
+    withLicense: (data: appData[]) => getCountFieldNotNull(data, 'license'),
+    percentWithLicense: (data: appData[]) => getPercentFieldNotNull(data, 'license'),
+    totalContributors: (data: appData[]) => getSum(data, 'contributorCount'),
+    avgBusFactor: (data: appData[]) => getAvg(data, 'busFactor'),
+    reposPerUniversity: (data: appData[]) => makeCountsArray(data, 'university'),
+    languageDistribution: (data: appData[]) => makeFieldDistributionArray(data, 'language'),
+    licenseDistribution: (data: appData[]) => makeFieldDistributionArray(data, 'license'),
+    typeDistribution: (data: appData[]) => makeFieldDistributionArray(data, 'typePredictionGpt5Mini'),
+    communityFilesPresence: (data: appData[]) =>
         makeFieldsNotNullArray(data, [
             'issueTemplates',
             'securityPolicy',
@@ -40,11 +40,11 @@ const SUB_ENDPOINTS = {
             'description',
             'readme',
         ]),
-    languageDistributionByType: (data: parquetData[]) =>
+    languageDistributionByType: (data: appData[]) =>
         makeFieldDistributionByArray(data, 'language', 'typePredictionGpt5Mini'),
-    licenseDistributionByType: (data: parquetData[]) =>
+    licenseDistributionByType: (data: appData[]) =>
         makeFieldDistributionByArray(data, 'license', 'typePredictionGpt5Mini'),
-} satisfies Partial<Record<keyof RespOverview, (data: parquetData[]) => Resp[string]>>;
+} satisfies Partial<Record<keyof RespOverview, (data: appData[]) => Resp[string]>>;
 
 // Register primary GET response: build and return full RespOverview object
 router.get(BASE_OVERVIEW, (req, res) => {

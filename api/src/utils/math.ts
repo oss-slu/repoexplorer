@@ -1,8 +1,8 @@
-import type { parquetData } from '../types/parquetData';
+import type { appData } from '../types/appData';
 import type { nameValueArr } from '../types/routes';
 
 // Return summation of all values in rows of field
-export function getSum(rows: parquetData[], field: keyof parquetData): number {
+export function getSum(rows: appData[], field: keyof appData): number {
     let sum: number = 0;
     for (const row of rows) {
         if (typeof row[field] === 'number') sum += row[field];
@@ -11,30 +11,30 @@ export function getSum(rows: parquetData[], field: keyof parquetData): number {
 }
 
 // Return average of all values in rows of field
-export function getAvg(rows: parquetData[], field: keyof parquetData): number {
+export function getAvg(rows: appData[], field: keyof appData): number {
     if (rows.length === 0) return 0;
     return getSum(rows, field) / rows.length;
 }
 
 // Return the number of rows where the value in field is not null
-export function getCountFieldNotNull(rows: parquetData[], field: keyof parquetData): number {
+export function getCountFieldNotNull(rows: appData[], field: keyof appData): number {
     if (rows.length === 0) return 0;
     return rows.filter((row) => row[field] !== null).length;
 }
 
 // Return the number of rows where the value of the passed field is not null
-export function getPercentFieldNotNull(rows: parquetData[], field: keyof parquetData): number {
+export function getPercentFieldNotNull(rows: appData[], field: keyof appData): number {
     if (rows.length === 0) return 0;
     return (getCountFieldNotNull(rows, field) / rows.length) * 100;
 }
 
 // Return a nameValueArray with each field and the percent of rows where that field is not null
-export function makeFieldsNotNullArray(rows: parquetData[], fields: (keyof parquetData)[]): nameValueArr {
+export function makeFieldsNotNullArray(rows: appData[], fields: (keyof appData)[]): nameValueArr {
     return fields.map((f) => ({ name: f, value: getPercentFieldNotNull(rows, f) }));
 }
 
 // Return count of rows grouped by field. If field is not passed, return total length
-function getCountsByField(rows: parquetData[], field?: keyof parquetData): Record<string, number> {
+function getCountsByField(rows: appData[], field?: keyof appData): Record<string, number> {
     if (!field) return { total: rows.length };
 
     const counts: Record<string, number> = {};
@@ -46,7 +46,7 @@ function getCountsByField(rows: parquetData[], field?: keyof parquetData): Recor
 }
 
 // Return the distribution of values in field
-function getFieldDistribution(rows: parquetData[], field: keyof parquetData): Record<string, number> {
+function getFieldDistribution(rows: appData[], field: keyof appData): Record<string, number> {
     const dist: Record<string, number> = {};
     for (const [key, count] of Object.entries(getCountsByField(rows, field))) {
         dist[key] = count / rows.length;
@@ -60,12 +60,12 @@ function makeNameValueArr(data: Record<string, number>): nameValueArr {
 }
 
 // Return array of distributions of values grouped by field
-export function makeFieldDistributionArray(rows: parquetData[], field: keyof parquetData) {
+export function makeFieldDistributionArray(rows: appData[], field: keyof appData) {
     return makeNameValueArr(getFieldDistribution(rows, field));
 }
 
 // Return array of distributions of values in field grouped further with by (useful for stacked bar charts)
-export function makeFieldDistributionByArray(rows: parquetData[], field: keyof parquetData, by: keyof parquetData) {
+export function makeFieldDistributionByArray(rows: appData[], field: keyof appData, by: keyof appData) {
     const fieldVals = [...new Set(rows.map((row) => row[field]))];
     return fieldVals.map((val) => {
         const fieldData = rows.filter((row) => row[field] === val);
@@ -75,7 +75,7 @@ export function makeFieldDistributionByArray(rows: parquetData[], field: keyof p
 }
 
 // Return array of counts of rows grouped by field
-export function makeCountsArray(rows: parquetData[], field?: keyof parquetData): nameValueArr {
+export function makeCountsArray(rows: appData[], field?: keyof appData): nameValueArr {
     const counts = getCountsByField(rows, field);
     return makeNameValueArr(counts);
 }
