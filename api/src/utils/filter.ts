@@ -1,11 +1,5 @@
+import { FILTERABLE_FIELDS } from '../consts';
 import type { parquetData } from '../types/parquetData';
-
-const FILTERABLE_FIELDS: Partial<Record<keyof parquetData, 'exact' | 'includes'>> = {
-    university: 'exact',
-    language: 'exact',
-    license: 'exact',
-    typePredictionGpt5Mini: 'exact',
-};
 
 export function filterData(data: parquetData[], query: Record<string, unknown>): parquetData[] {
     return data.filter((row) =>
