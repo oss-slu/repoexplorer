@@ -1,4 +1,4 @@
-export type parquetData = {
+export type appData = {
     university: string;
     id: number;
     fullName: string | null;
