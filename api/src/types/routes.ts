@@ -23,7 +23,17 @@ export type RespOverview = {
 };
 
 // /impact route base type
-export type RespImpact = Resp & {};
+export type RespImpact = Resp & {
+    impactIndicatorsPerUniversity?: nameMultiValArr;
+    totalStars?: number;
+    totalForks?: number;
+    totalDownloads?: number;
+    totalContributors?: number;
+    starsDistribution?: nameValueArr;
+    forksDistribution?: nameValueArr;
+    releaseDownloadsDistribution?: nameValueArr;
+    contributorsDistribution?: nameValueArr;
+};
 
 // /sustainability route base type
 export type RespSustainability = Resp & {};
