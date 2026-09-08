@@ -3,11 +3,7 @@ import { BASE_IMPACT } from '../consts';
 import type { Resp, RespImpact } from '../types/routes';
 import type { appData } from '../types/appData';
 import sampleData from '../../data/sample/sampleRepoData.json';
-import {
-    getSum,
-    makeNumericDistributionArray,
-    makeImpactIndicatorsArray
-} from '../utils/math';
+import { getSum, makeNumericDistributionArray, makeImpactIndicatorsArray } from '../utils/math';
 import { filterData } from '../utils/filter';
 
 const data = sampleData as appData[];
@@ -23,7 +19,7 @@ const SUB_ENDPOINTS = {
     starsDistribution: (data: appData[]) => makeNumericDistributionArray(data, 'stargazersCount'),
     forksDistribution: (data: appData[]) => makeNumericDistributionArray(data, 'forksCount'),
     releaseDownloadsDistribution: (data: appData[]) => makeNumericDistributionArray(data, 'releaseDownloads'),
-    contributorsDistribution: (data: appData[]) => makeNumericDistributionArray(data, 'contributorCount')
+    contributorsDistribution: (data: appData[]) => makeNumericDistributionArray(data, 'contributorCount'),
 } satisfies Partial<Record<keyof RespImpact, (data: appData[]) => Resp[string]>>;
 
 // Register primary GET response: build and return full RespImpact object
@@ -31,7 +27,7 @@ router.get(BASE_IMPACT, (req, res) => {
     const filtered = filterData(data, req.query);
     const response: Partial<RespImpact> = {};
 
-    for (const [endpoint, fn] of Object.entries(SUB_ENDPOINTS)){
+    for (const [endpoint, fn] of Object.entries(SUB_ENDPOINTS)) {
         const key = endpoint as keyof RespImpact;
         response[key] = fn(filtered) as RespImpact[keyof RespImpact];
     }

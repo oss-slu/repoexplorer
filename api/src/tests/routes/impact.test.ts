@@ -2,14 +2,12 @@ import request from 'supertest';
 import { createApp } from '../../app';
 
 describe('GET /impact', () => {
-
     it('returns successful response', async () => {
         const app = createApp();
         const res = await request(app).get('/impact');
 
         expect(res.status).toBe(200);
     });
-
 
     it('returns all impact fields', async () => {
         const app = createApp();
@@ -97,5 +95,4 @@ describe('GET /impact', () => {
         expect(res.status).toBe(200);
         expect(Array.isArray(res.body.contributorsDistribution)).toBe(true);
     });
-
 });

@@ -80,10 +80,7 @@ export function makeCountsArray(rows: appData[], field?: keyof appData): nameVal
     return makeNameValueArr(counts);
 }
 
-export function makeNumericDistributionArray(
-    rows: appData[],
-    field: keyof appData
-) {
+export function makeNumericDistributionArray(rows: appData[], field: keyof appData) {
     const buckets: Record<string, number> = {
         '0-10': 0,
         '11-100': 0,
@@ -106,7 +103,7 @@ export function makeNumericDistributionArray(
 
     return Object.entries(buckets).map(([name, value]) => ({
         name,
-        value
+        value,
     }));
 }
 

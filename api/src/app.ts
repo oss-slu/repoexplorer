@@ -7,7 +7,7 @@ import impact from './routes/impact';
 export const ROUTES = [
     { router: health, route: '/health' },
     { router: overview, route: '/overview' },
-    { router: impact, route: '/impact' }
+    { router: impact, route: '/impact' },
 ];
 
 export function createApp(origin?: string) {
