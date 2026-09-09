@@ -24,11 +24,11 @@ export type RespOverview = {
 
 // /impact route base type
 export type RespImpact = Resp & {
-    impactIndicatorsPerUniversity?: nameMultiValArr;
     totalStars?: number;
     totalForks?: number;
     totalDownloads?: number;
     totalContributors?: number;
+    impactIndicatorsPerUniversity?: nameMultiValArr;
     starsDistribution?: nameValueArr;
     forksDistribution?: nameValueArr;
     releaseDownloadsDistribution?: nameValueArr;
