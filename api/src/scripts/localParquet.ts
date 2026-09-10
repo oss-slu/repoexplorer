@@ -6,9 +6,7 @@ import type { parqFileOpts } from '../types/scripts';
 
 const { positionals } = parseArgs({ allowPositionals: true });
 const modeOpts = ['REPO', 'SECR', 'ORGS', 'EACH'];
-const mode = positionals[0]?.toUpperCase();
-
-// const runMode: parqFileOpts = (mode === 'REPO' || mode === 'SECR' || mode === 'ORGS' || mode == 'EACH') ? mode : 'REPO';
+const mode = positionals[0]?.toUpperCase()
 const runMode: string = modeOpts.includes(mode) ? mode : 'EACH';
 
 // const QUEUE = ['REPO', 'SECR', 'ORGS'];

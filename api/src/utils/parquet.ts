@@ -7,7 +7,7 @@ import { parquetMetadataAsync } from 'hyparquet';
 import { MMDDYY_HHMMSS } from '../utils/datetime';
 import { UCOSPO_REPO_PARQ_S3_URL, PARQUET_DATA_DIR, UCOSPO_SECR_PARQ_S3_URL, UCOSPO_ORGS_PARQ_S3_URL } from '../consts';
 import { confirmDirExists } from './cli';
-import type { appData } from '../types/appData';
+import type { appData, orgsData, secrData } from '../types/appData';
 import { readParquet } from 'parquet-wasm/node';
 import { tableFromIPC } from 'apache-arrow';
 import { toCamel } from './strings';
@@ -91,11 +91,11 @@ export async function parquetColumnNames(buf: ArrayBuffer): Promise<string[]> {
     return (await parquetMetadataAsync(buf)).schema.slice(1).map((f) => f.name);
 }
 
-export async function parquetToObjects(buf: ArrayBuffer): Promise<appData[]> {
+export async function parquetToObjects(buf: ArrayBuffer): Promise<appData[] | secrData[] | orgsData[]> {
     const wasmTable = readParquet(new Uint8Array(buf));
     const arrowTable = tableFromIPC(wasmTable.intoIPCStream());
 
-    const rows: appData[] = [];
+    const rows: (appData[] | secrData[] | orgsData[]) = [];
     for (const row of arrowTable) {
         const obj: any = {};
         for (const field of arrowTable.schema.fields) {
@@ -103,7 +103,7 @@ export async function parquetToObjects(buf: ArrayBuffer): Promise<appData[]> {
             if (typeof value === 'bigint') value = Number(value);
             obj[toCamel(field.name)] = value;
         }
-        rows.push(obj as appData);
+        rows.push(obj as (appData & secrData & orgsData));
     }
     return rows;
 }
