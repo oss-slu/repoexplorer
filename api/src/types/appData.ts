@@ -1,3 +1,5 @@
+export type filterMode = 'exact';
+
 export type appData = {
     university: string;
     id: number;

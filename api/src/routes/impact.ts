@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { BASE_IMPACT } from '../consts';
+import { BASE_IMPACT, FILTERABLE_REPO_FIELDS } from '../consts';
 import type { Resp, RespImpact } from '../types/routes';
 import type { appData } from '../types/appData';
 import sampleData from '../../data/sample/sampleRepoData.json';
@@ -24,7 +24,7 @@ const SUB_ENDPOINTS = {
 
 // Register primary GET response: build and return full RespImpact object
 router.get(BASE_IMPACT, (req, res) => {
-    const filtered = filterData(data, req.query);
+    const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
     const response: Partial<RespImpact> = {};
 
     for (const [endpoint, fn] of Object.entries(SUB_ENDPOINTS)) {
@@ -38,7 +38,7 @@ router.get(BASE_IMPACT, (req, res) => {
 // (e.g. /impact/totalStars returns only the return value of getUniqueCount(data))
 for (const [endpoint, fn] of Object.entries(SUB_ENDPOINTS)) {
     router.get(`${BASE_IMPACT}/${endpoint}`, (req, res) => {
-        const filtered = filterData(data, req.query);
+        const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
         const value = fn(filtered) as RespImpact[keyof RespImpact];
         res.json({ [endpoint]: value } satisfies Partial<RespImpact>);
     });

@@ -1,10 +1,13 @@
-import { FILTERABLE_FIELDS } from '../consts';
-import type { appData } from '../types/appData';
+import type { filterMode, appData } from '../types/appData';
 
-export function filterData(data: appData[], query: Record<string, unknown>): appData[] {
+export function filterData<T extends Record<string, unknown>>(
+    data: T[],
+    query: Record<string, unknown>,
+    filterableFields: Partial<Record<keyof T, filterMode>>,
+): T[] {
     return data.filter((row) =>
-        Object.entries(FILTERABLE_FIELDS).every(([field, mode]) => {
-            const raw = query[field];
+        (Object.entries(filterableFields) as [keyof T, filterMode][]).every(([field, mode]) => {
+            const raw = query[field as string];
             if (raw === undefined) return true; // no filter on this field
 
             const value = Array.isArray(raw) ? raw : [raw];

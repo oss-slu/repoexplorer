@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { BASE_OVERVIEW } from '../consts';
+import { BASE_OVERVIEW, FILTERABLE_REPO_FIELDS } from '../consts';
 import type { Resp, RespOverview } from '../types/routes';
 import type { appData } from '../types/appData';
 import sampleData from '../../data/sample/sampleRepoData.json';
@@ -48,7 +48,7 @@ const SUB_ENDPOINTS = {
 
 // Register primary GET response: build and return full RespOverview object
 router.get(BASE_OVERVIEW, (req, res) => {
-    const filtered = filterData(data, req.query);
+    const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
     res.json(
         Object.fromEntries(
             Object.entries(SUB_ENDPOINTS).map(([endpoint, fn]) => [endpoint, fn(filtered) as RespOverview]),
@@ -60,7 +60,7 @@ router.get(BASE_OVERVIEW, (req, res) => {
 // (e.g. /overview/totalRepos returns only the return value of getUniqueCount(data))
 for (const [endpoint, fn] of Object.entries(SUB_ENDPOINTS)) {
     router.get(`${BASE_OVERVIEW}/${endpoint}`, (req, res) => {
-        const filtered = filterData(data, req.query);
+        const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
         res.json({ [endpoint]: fn(filtered) as RespOverview });
     });
 }
