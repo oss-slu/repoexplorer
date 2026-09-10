@@ -7,7 +7,7 @@
     cd api
     npx tsx src/scripts/localParquet.ts
     ```
-    - Creates /api/data directory and downloads the parquet file from the public UC USPO S3 buckets
+    - Creates /api/data directory and downloads the parquet files from the public UC USPO S3 buckets
 
 - ### create a new type with the columns in the parquet file 
     - */api/src/scripts/parquetColsToType.ts*

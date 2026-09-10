@@ -79,3 +79,62 @@ export function makeCountsArray(rows: appData[], field?: keyof appData): nameVal
     const counts = getCountsByField(rows, field);
     return makeNameValueArr(counts);
 }
+
+export function makeNumericDistributionArray(rows: appData[], field: keyof appData) {
+    const buckets: Record<string, number> = {
+        '0-10': 0,
+        '11-100': 0,
+        '101-1000': 0,
+        '1k-10k': 0,
+        '10k+': 0,
+    };
+
+    for (const row of rows) {
+        const value = row[field];
+
+        if (typeof value !== 'number') continue;
+
+        if (value < 11) buckets['0-10']++;
+        else if (value < 101) buckets['11-100']++;
+        else if (value < 1001) buckets['101-1000']++;
+        else if (value < 10001) buckets['1k-10k']++;
+        else buckets['10k+']++;
+    }
+
+    return Object.entries(buckets).map(([name, value]) => ({
+        name,
+        value,
+    }));
+}
+
+export function makeImpactIndicatorsArray(rows: appData[]) {
+    const totals = new Map<
+        string,
+        {
+            name: string;
+            stars: number;
+            forks: number;
+            downloads: number;
+            contributors: number;
+        }
+    >();
+
+    for (const row of rows) {
+        const current = totals.get(row.university) ?? {
+            name: row.university,
+            stars: 0,
+            forks: 0,
+            downloads: 0,
+            contributors: 0,
+        };
+
+        current.stars += row.stargazersCount;
+        current.forks += row.forksCount;
+        current.downloads += row.releaseDownloads;
+        current.contributors += row.contributorCount;
+
+        totals.set(row.university, current);
+    }
+
+    return [...totals.values()];
+}

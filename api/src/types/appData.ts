@@ -33,3 +33,40 @@ export type appData = {
     affiliationPredictionGpt5Mini: number;
     typePredictionGpt5Mini: string | null;
 };
+
+export type secrData = {
+    htmlUrl: string;
+    binaryArtifacts: number;
+    branchProtection: number;
+    ciTests: number;
+    ciBestPractices: number;
+    codeReview: number;
+    contributors: number;
+    dangerousWorkflow: number;
+    dependencyUpdateTool: number;
+    fuzzing: number;
+    license: number;
+    maintained: number;
+    packaging: number;
+    pinnedDependencies: number;
+    sast: number;
+    securityPolicy: number;
+    signedReleases: number;
+    tokenPermissions: number;
+    vulnerabilities: number;
+    totalScore: number;
+};
+
+export type orgsData = {
+    login: string;
+    name: string;
+    description: string;
+    location: string;
+    company: string;
+    email: string;
+    url: string;
+    createdAt: string;
+    updatedAt: string;
+    university: string;
+    affiliationPredictionOrgs: string;
+};
