@@ -1,4 +1,4 @@
-import type { repoData } from '../types/appData';
+import type { repoData, secrData } from '../types/appData';
 import type { nameValueArr } from '../types/routes';
 
 // Return summation of all values in rows of field
@@ -137,4 +137,21 @@ export function makeImpactIndicatorsArray(rows: repoData[]) {
     }
 
     return [...totals.values()];
+}
+
+export function makeAvgScorePerMetricArray(rows: secrData[]): nameValueArr {
+    const fields = Object.keys(rows[0] ?? {}).filter((field) => field !== 'htmlUrl') as (keyof secrData)[];
+
+    return fields.map((field) => {
+        const scores = rows
+            .map((row) => row[field])
+            .filter((value): value is number => typeof value === 'number' && value !== -1);
+
+        const value = scores.length === 0 ? 0 : scores.reduce((sum, score) => sum + score, 0) / scores.length;
+
+        return {
+            name: field,
+            value,
+        };
+    });
 }

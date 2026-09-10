@@ -1,3 +1,4 @@
+import type { secrData } from './appData';
 export type nameValue = { name: string; value: number };
 export type nameValueArr = nameValue[];
 export type nameMultiVal = { name: string; [key: string]: string | number };
@@ -39,4 +40,7 @@ export type RespImpact = Resp & {
 export type RespSustainability = Resp & {};
 
 // /security route base type
-export type RespSecurity = Resp & {};
+export type RespSecurity = {
+    securityScorecardByRepo?: secrData[];
+    avgScorePerMetric?: nameValueArr;
+};

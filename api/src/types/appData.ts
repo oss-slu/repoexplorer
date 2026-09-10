@@ -41,7 +41,7 @@ export type secrData = {
     binaryArtifacts: number;
     branchProtection: number;
     ciTests: number;
-    ciBestPractices: number;
+    ciiBestPractices: number;
     codeReview: number;
     contributors: number;
     dangerousWorkflow: number;
