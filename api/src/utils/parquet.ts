@@ -15,7 +15,7 @@ import type { parqFileOpts } from '../types/scripts';
 
 // Fetch and save a parquet file from the UC OSPO S3 bucket
 export async function getParquet(runMode: parqFileOpts): Promise<void> {
-    let url = ''; 
+    let url = '';
     switch (runMode) {
         case 'REPO':
             url = UCOSPO_REPO_PARQ_S3_URL;
@@ -25,7 +25,7 @@ export async function getParquet(runMode: parqFileOpts): Promise<void> {
             break;
         case 'ORGS':
             url = UCOSPO_ORGS_PARQ_S3_URL;
-            break; 
+            break;
     }
 
     console.log(`Awaiting ${runMode} response from ${url}...`);
@@ -54,13 +54,14 @@ export async function getParquet(runMode: parqFileOpts): Promise<void> {
 */
 // export async function findRecentParquetInDir(dir: string = PARQUET_DATA_DIR): Promise<string> {
 export async function findRecentParquetInDir(runMode: parqFileOpts): Promise<string> {
-    const dir: string = PARQUET_DATA_DIR
+    const dir: string = PARQUET_DATA_DIR;
     const exists = await confirmDirExists(dir);
     if (!exists) return '';
 
     const entries: Dirent<string>[] = await fs.readdir(dir, { withFileTypes: true });
-    const parqFiles = entries.filter((f) =>
-        f.isFile() && f.name.toLowerCase().endsWith('.parquet') && f.name.includes(runMode));
+    const parqFiles = entries.filter(
+        (f) => f.isFile() && f.name.toLowerCase().endsWith('.parquet') && f.name.includes(runMode),
+    );
     if (parqFiles.length === 0) return '';
 
     const withStats = await Promise.all(
@@ -95,7 +96,7 @@ export async function parquetToObjects(buf: ArrayBuffer): Promise<appData[] | se
     const wasmTable = readParquet(new Uint8Array(buf));
     const arrowTable = tableFromIPC(wasmTable.intoIPCStream());
 
-    const rows: (appData[] | secrData[] | orgsData[]) = [];
+    const rows: appData[] | secrData[] | orgsData[] = [];
     for (const row of arrowTable) {
         const obj: any = {};
         for (const field of arrowTable.schema.fields) {
@@ -103,7 +104,7 @@ export async function parquetToObjects(buf: ArrayBuffer): Promise<appData[] | se
             if (typeof value === 'bigint') value = Number(value);
             obj[toCamel(field.name)] = value;
         }
-        rows.push(obj as (appData & secrData & orgsData));
+        rows.push(obj as appData & secrData & orgsData);
     }
     return rows;
 }

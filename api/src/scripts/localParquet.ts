@@ -6,7 +6,7 @@ import type { parqFileOpts } from '../types/scripts';
 
 const { positionals } = parseArgs({ allowPositionals: true });
 const modeOpts = ['REPO', 'SECR', 'ORGS', 'EACH'];
-const mode = positionals[0]?.toUpperCase()
+const mode = positionals[0]?.toUpperCase();
 const runMode: string = modeOpts.includes(mode) ? mode : 'EACH';
 
 // const QUEUE = ['REPO', 'SECR', 'ORGS'];
@@ -27,5 +27,3 @@ QUEUE.forEach(async (run) => {
 
     await getParquet(run as parqFileOpts);
 });
-
-

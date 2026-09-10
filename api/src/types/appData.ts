@@ -48,8 +48,8 @@ export type secrData = {
     license: number;
     maintained: number;
     packaging: number;
-    pinnedDependencies: number; 
-    sast: number; 
+    pinnedDependencies: number;
+    sast: number;
     securityPolicy: number;
     signedReleases: number;
     tokenPermissions: number;
