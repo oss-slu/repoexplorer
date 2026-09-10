@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { BASE_OVERVIEW, FILTERABLE_REPO_FIELDS } from '../consts';
 import type { Resp, RespOverview } from '../types/routes';
-import type { appData } from '../types/appData';
+import type { repoData } from '../types/appData';
 import sampleData from '../../data/sample/sampleRepoData.json';
 import {
     getAvg,
@@ -15,21 +15,21 @@ import {
 } from '../utils/math';
 import { filterData } from '../utils/filter';
 
-const data = sampleData as appData[];
+const data = sampleData as repoData[];
 const router = Router();
 
 // Create endpoint map: the string is the /destination and the function call gets the appropriate data
 const SUB_ENDPOINTS = {
-    totalRepos: (data: appData[]) => data.length,
-    withLicense: (data: appData[]) => getCountFieldNotNull(data, 'license'),
-    percentWithLicense: (data: appData[]) => getPercentFieldNotNull(data, 'license'),
-    totalContributors: (data: appData[]) => getSum(data, 'contributorCount'),
-    avgBusFactor: (data: appData[]) => getAvg(data, 'busFactor'),
-    reposPerUniversity: (data: appData[]) => makeCountsArray(data, 'university'),
-    languageDistribution: (data: appData[]) => makeFieldDistributionArray(data, 'language'),
-    licenseDistribution: (data: appData[]) => makeFieldDistributionArray(data, 'license'),
-    typeDistribution: (data: appData[]) => makeFieldDistributionArray(data, 'typePredictionGpt5Mini'),
-    communityFilesPresence: (data: appData[]) =>
+    totalRepos: (data: repoData[]) => data.length,
+    withLicense: (data: repoData[]) => getCountFieldNotNull(data, 'license'),
+    percentWithLicense: (data: repoData[]) => getPercentFieldNotNull(data, 'license'),
+    totalContributors: (data: repoData[]) => getSum(data, 'contributorCount'),
+    avgBusFactor: (data: repoData[]) => getAvg(data, 'busFactor'),
+    reposPerUniversity: (data: repoData[]) => makeCountsArray(data, 'university'),
+    languageDistribution: (data: repoData[]) => makeFieldDistributionArray(data, 'language'),
+    licenseDistribution: (data: repoData[]) => makeFieldDistributionArray(data, 'license'),
+    typeDistribution: (data: repoData[]) => makeFieldDistributionArray(data, 'typePredictionGpt5Mini'),
+    communityFilesPresence: (data: repoData[]) =>
         makeFieldsNotNullArray(data, [
             'issueTemplates',
             'securityPolicy',
@@ -40,11 +40,11 @@ const SUB_ENDPOINTS = {
             'description',
             'readme',
         ]),
-    languageDistributionByType: (data: appData[]) =>
+    languageDistributionByType: (data: repoData[]) =>
         makeFieldDistributionByArray(data, 'language', 'typePredictionGpt5Mini'),
-    licenseDistributionByType: (data: appData[]) =>
+    licenseDistributionByType: (data: repoData[]) =>
         makeFieldDistributionByArray(data, 'license', 'typePredictionGpt5Mini'),
-} satisfies Partial<Record<keyof RespOverview, (data: appData[]) => Resp[string]>>;
+} satisfies Partial<Record<keyof RespOverview, (data: repoData[]) => Resp[string]>>;
 
 // Register primary GET response: build and return full RespOverview object
 router.get(BASE_OVERVIEW, (req, res) => {

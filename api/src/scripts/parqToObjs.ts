@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { findRecentParquetInDir, getParquet, parquetToObjects, readParquetFile } from '../utils/parquet';
 import { parseArgs } from 'util';
 import type { parqFileOpts } from '../types/scripts';
-import type { appData } from '../types/appData';
+import type { repoData } from '../types/appData';
 import { capitalize } from '../utils/strings';
 
 const { positionals } = parseArgs({ allowPositionals: true });
@@ -22,7 +22,7 @@ QUEUE.forEach(async (run) => {
     let data = objs;
     // filter to oss-slu repos
     if (run === 'REPO') {
-        data = (objs as appData[]).filter((r) => ['UC-OSPO-Network', 'oss-slu'].includes(r.owner));
+        data = (objs as repoData[]).filter((r) => ['UC-OSPO-Network', 'oss-slu'].includes(r.owner));
     } else {
         data = objs.slice(0, 100);
     }

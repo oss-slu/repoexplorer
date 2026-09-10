@@ -1,8 +1,8 @@
-import type { appData } from '../types/appData';
+import type { repoData } from '../types/appData';
 import type { nameValueArr } from '../types/routes';
 
 // Return summation of all values in rows of field
-export function getSum(rows: appData[], field: keyof appData): number {
+export function getSum(rows: repoData[], field: keyof repoData): number {
     let sum: number = 0;
     for (const row of rows) {
         if (typeof row[field] === 'number') sum += row[field];
@@ -11,30 +11,30 @@ export function getSum(rows: appData[], field: keyof appData): number {
 }
 
 // Return average of all values in rows of field
-export function getAvg(rows: appData[], field: keyof appData): number {
+export function getAvg(rows: repoData[], field: keyof repoData): number {
     if (rows.length === 0) return 0;
     return getSum(rows, field) / rows.length;
 }
 
 // Return the number of rows where the value in field is not null
-export function getCountFieldNotNull(rows: appData[], field: keyof appData): number {
+export function getCountFieldNotNull(rows: repoData[], field: keyof repoData): number {
     if (rows.length === 0) return 0;
     return rows.filter((row) => row[field] !== null).length;
 }
 
 // Return the number of rows where the value of the passed field is not null
-export function getPercentFieldNotNull(rows: appData[], field: keyof appData): number {
+export function getPercentFieldNotNull(rows: repoData[], field: keyof repoData): number {
     if (rows.length === 0) return 0;
     return (getCountFieldNotNull(rows, field) / rows.length) * 100;
 }
 
 // Return a nameValueArray with each field and the percent of rows where that field is not null
-export function makeFieldsNotNullArray(rows: appData[], fields: (keyof appData)[]): nameValueArr {
+export function makeFieldsNotNullArray(rows: repoData[], fields: (keyof repoData)[]): nameValueArr {
     return fields.map((f) => ({ name: f, value: getPercentFieldNotNull(rows, f) }));
 }
 
 // Return count of rows grouped by field. If field is not passed, return total length
-function getCountsByField(rows: appData[], field?: keyof appData): Record<string, number> {
+function getCountsByField(rows: repoData[], field?: keyof repoData): Record<string, number> {
     if (!field) return { total: rows.length };
 
     const counts: Record<string, number> = {};
@@ -46,7 +46,7 @@ function getCountsByField(rows: appData[], field?: keyof appData): Record<string
 }
 
 // Return the distribution of values in field
-function getFieldDistribution(rows: appData[], field: keyof appData): Record<string, number> {
+function getFieldDistribution(rows: repoData[], field: keyof repoData): Record<string, number> {
     const dist: Record<string, number> = {};
     for (const [key, count] of Object.entries(getCountsByField(rows, field))) {
         dist[key] = count / rows.length;
@@ -60,12 +60,12 @@ function makeNameValueArr(data: Record<string, number>): nameValueArr {
 }
 
 // Return array of distributions of values grouped by field
-export function makeFieldDistributionArray(rows: appData[], field: keyof appData) {
+export function makeFieldDistributionArray(rows: repoData[], field: keyof repoData) {
     return makeNameValueArr(getFieldDistribution(rows, field));
 }
 
 // Return array of distributions of values in field grouped further with by (useful for stacked bar charts)
-export function makeFieldDistributionByArray(rows: appData[], field: keyof appData, by: keyof appData) {
+export function makeFieldDistributionByArray(rows: repoData[], field: keyof repoData, by: keyof repoData) {
     const fieldVals = [...new Set(rows.map((row) => row[field]))];
     return fieldVals.map((val) => {
         const fieldData = rows.filter((row) => row[field] === val);
@@ -75,12 +75,12 @@ export function makeFieldDistributionByArray(rows: appData[], field: keyof appDa
 }
 
 // Return array of counts of rows grouped by field
-export function makeCountsArray(rows: appData[], field?: keyof appData): nameValueArr {
+export function makeCountsArray(rows: repoData[], field?: keyof repoData): nameValueArr {
     const counts = getCountsByField(rows, field);
     return makeNameValueArr(counts);
 }
 
-export function makeNumericDistributionArray(rows: appData[], field: keyof appData) {
+export function makeNumericDistributionArray(rows: repoData[], field: keyof repoData) {
     const buckets: Record<string, number> = {
         '0-10': 0,
         '11-100': 0,
@@ -107,7 +107,7 @@ export function makeNumericDistributionArray(rows: appData[], field: keyof appDa
     }));
 }
 
-export function makeImpactIndicatorsArray(rows: appData[]) {
+export function makeImpactIndicatorsArray(rows: repoData[]) {
     const totals = new Map<
         string,
         {

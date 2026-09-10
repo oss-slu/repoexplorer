@@ -1,4 +1,4 @@
-import type { filterMode, appData } from '../types/appData';
+import type { filterMode } from '../types/appData';
 
 export function filterData<T extends Record<string, unknown>>(
     data: T[],
@@ -11,7 +11,7 @@ export function filterData<T extends Record<string, unknown>>(
             if (raw === undefined) return true; // no filter on this field
 
             const value = Array.isArray(raw) ? raw : [raw];
-            const rowValue = row[field as keyof appData];
+            const rowValue = row[field as keyof T];
 
             if (mode === 'exact') {
                 return value.some((v) => String(v).toLowerCase() === String(rowValue).toLowerCase());

@@ -1,26 +1,26 @@
 import { Router } from 'express';
 import { BASE_IMPACT, FILTERABLE_REPO_FIELDS } from '../consts';
 import type { Resp, RespImpact } from '../types/routes';
-import type { appData } from '../types/appData';
+import type { repoData } from '../types/appData';
 import sampleData from '../../data/sample/sampleRepoData.json';
 import { getSum, makeNumericDistributionArray, makeImpactIndicatorsArray } from '../utils/math';
 import { filterData } from '../utils/filter';
 
-const data = sampleData as appData[];
+const data = sampleData as repoData[];
 const router = Router();
 
 // Create endpoint map: the string is the /destination and the function call gets the appropriate data
 const SUB_ENDPOINTS = {
-    totalStars: (data: appData[]) => getSum(data, 'stargazersCount'),
-    totalForks: (data: appData[]) => getSum(data, 'forksCount'),
-    totalDownloads: (data: appData[]) => getSum(data, 'releaseDownloads'),
-    totalContributors: (data: appData[]) => getSum(data, 'contributorCount'),
-    impactIndicatorsPerUniversity: (data: appData[]) => makeImpactIndicatorsArray(data),
-    starsDistribution: (data: appData[]) => makeNumericDistributionArray(data, 'stargazersCount'),
-    forksDistribution: (data: appData[]) => makeNumericDistributionArray(data, 'forksCount'),
-    releaseDownloadsDistribution: (data: appData[]) => makeNumericDistributionArray(data, 'releaseDownloads'),
-    contributorsDistribution: (data: appData[]) => makeNumericDistributionArray(data, 'contributorCount'),
-} satisfies Partial<Record<keyof RespImpact, (data: appData[]) => Resp[string]>>;
+    totalStars: (data: repoData[]) => getSum(data, 'stargazersCount'),
+    totalForks: (data: repoData[]) => getSum(data, 'forksCount'),
+    totalDownloads: (data: repoData[]) => getSum(data, 'releaseDownloads'),
+    totalContributors: (data: repoData[]) => getSum(data, 'contributorCount'),
+    impactIndicatorsPerUniversity: (data: repoData[]) => makeImpactIndicatorsArray(data),
+    starsDistribution: (data: repoData[]) => makeNumericDistributionArray(data, 'stargazersCount'),
+    forksDistribution: (data: repoData[]) => makeNumericDistributionArray(data, 'forksCount'),
+    releaseDownloadsDistribution: (data: repoData[]) => makeNumericDistributionArray(data, 'releaseDownloads'),
+    contributorsDistribution: (data: repoData[]) => makeNumericDistributionArray(data, 'contributorCount'),
+} satisfies Partial<Record<keyof RespImpact, (data: repoData[]) => Resp[string]>>;
 
 // Register primary GET response: build and return full RespImpact object
 router.get(BASE_IMPACT, (req, res) => {

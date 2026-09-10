@@ -1,6 +1,6 @@
 export type filterMode = 'exact';
 
-export type appData = {
+export type repoData = {
     university: string;
     id: number;
     fullName: string | null;
