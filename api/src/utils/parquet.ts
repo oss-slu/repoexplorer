@@ -98,7 +98,7 @@ export async function parquetToObjects(buf: ArrayBuffer): Promise<repoData[] | s
 
     const rows: repoData[] | secrData[] | orgsData[] = [];
     for (const row of arrowTable) {
-        const obj: any = {};
+        const obj: Record<string, unknown> = {};
         for (const field of arrowTable.schema.fields) {
             let value = row[field.name];
             if (typeof value === 'bigint') value = Number(value);

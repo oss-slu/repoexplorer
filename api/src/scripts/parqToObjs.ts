@@ -19,13 +19,10 @@ QUEUE.forEach(async (run) => {
             (await getParquet(run as parqFileOpts)),
     );
 
-    let data = objs;
-    // filter to oss-slu repos
-    if (run === 'REPO') {
-        data = (objs as repoData[]).filter((r) => ['UC-OSPO-Network', 'oss-slu'].includes(r.owner));
-    } else {
-        data = objs.slice(0, 100);
-    }
+    const data =
+        run === 'REPO'
+            ? (objs as repoData[]).filter((r) => ['UC-OSPO-Network', 'oss-slu'].includes(r.owner))
+            : objs.slice(0, 100);
 
     await writeFile(`data/sample/sample${capitalize(run)}Data.json`, JSON.stringify(data, null, 2));
 

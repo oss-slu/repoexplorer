@@ -37,7 +37,43 @@ export type RespImpact = Resp & {
 };
 
 // /sustainability route base type
-export type RespSustainability = Resp & {};
+export type sustainabilityIndicator = {
+    name: string;
+    avgContributors: number;
+    avgBusFactor: number;
+};
+
+export type sustainabilityCommunityFile = {
+    name: string;
+    total: number;
+    percentage: number;
+    [projectType: string]: string | number;
+};
+
+export type sustainabilityCommunityFileByStars = {
+    name: string;
+    '0-10': number;
+    '11-50': number;
+    '51-100': number;
+    '101-200': number;
+    '>200': number;
+};
+
+export type sustainabilityDistribution = {
+    name: string;
+    value: number;
+    percentage: number;
+};
+
+export type respSustainability = {
+    sustainabilityIndicatorsPerUniversity: sustainabilityIndicator[];
+    avgContributors: number;
+    avgBusFactor: number;
+    communityFiles: sustainabilityCommunityFile[];
+    communityFilesByStars: sustainabilityCommunityFileByStars[];
+    busFactorDistribution: sustainabilityDistribution[];
+    contributorCountDistribution: sustainabilityDistribution[];
+};
 
 // /security route base type
 export type RespSecurity = {
