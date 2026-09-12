@@ -18,10 +18,10 @@ describe('createApp', () => {
 
     it('mounts all expected routes', async () => {
         const app = createApp();
-        ROUTES.forEach(async (r) => {
+        for (const r of ROUTES) {
             const res = await request(app).get(r.route);
             expect(res.status).not.toBe(404);
-        });
+        }
     });
 
     it('returns 404 for an unmounted route', async () => {
