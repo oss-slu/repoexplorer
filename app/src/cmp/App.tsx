@@ -17,6 +17,20 @@ function App() {
                     title="License Distribution"
                     endpoint="overview/licenseDistribution"
                 />
+                <BarChartDiv
+                    title="Community Files Presence"
+                    endpoint="overview/communityFilesPresence"
+                />
+                <BarChartDiv
+                    title="Language Distribution by Type"
+                    endpoint="overview/languageDistributionByType"
+                    stacked
+                />
+                <BarChartDiv
+                    title="License Distribution by Type"
+                    endpoint="overview/licenseDistributionByType"
+                    stacked
+                />
             </main>
         </>
     );
