@@ -39,7 +39,7 @@ export default function PieChartDiv({ title, endpoint }: chartProps) {
                 );
             }
         })();
-    }, []);
+    }, [endpoint]);
 
     if (error)
         return (
@@ -71,11 +71,14 @@ export default function PieChartDiv({ title, endpoint }: chartProps) {
                         label={({ name, percent }) =>
                             `${name} ${(percent! * 100).toFixed(1)}%`
                         }
-                        shape={(props: any) => (
+                        shape={(props) => (
                             <Sector
                                 {...props}
                                 fill={
-                                    PIE_COLORS[props.index % PIE_COLORS.length]
+                                    PIE_COLORS[
+                                        ((props as { index?: number }).index ??
+                                            0) % PIE_COLORS.length
+                                    ]
                                 }
                             />
                         )}
