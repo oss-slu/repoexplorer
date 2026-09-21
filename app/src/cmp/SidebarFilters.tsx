@@ -61,9 +61,7 @@ export default function SidebarFilters({ filters }: SidebarFiltersProps) {
                         label={filter.label}
                         options={filter.options}
                         value={
-                            typeof currentValue === 'string'
-                                ? currentValue
-                                : ''
+                            typeof currentValue === 'string' ? currentValue : ''
                         }
                         onChange={(value) =>
                             setFilterValues((previousValues) => ({
