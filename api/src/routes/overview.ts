@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { BASE_OVERVIEW, FILTERABLE_REPO_FIELDS } from '../consts';
-import type { Resp, RespOverview } from '../types/routes';
+import type { RespOverview } from '../types/routes';
 import type { repoData } from '../types/appData';
 import sampleData from '../../data/sample/sampleRepoData.json';
 import {
@@ -20,17 +20,17 @@ const router = Router();
 
 // Create endpoint map: the string is the /destination and the function call gets the appropriate data
 const SUB_ENDPOINTS = {
-    totalRepos: (data: repoData[]) => data.length,
-    withLicense: (data: repoData[]) => getCountFieldNotNull(data, 'license'),
-    percentWithLicense: (data: repoData[]) => getPercentFieldNotNull(data, 'license'),
-    totalContributors: (data: repoData[]) => getSum(data, 'contributorCount'),
-    avgBusFactor: (data: repoData[]) => getAvg(data, 'busFactor'),
-    reposPerUniversity: (data: repoData[]) => makeCountsArray(data, 'university'),
-    languageDistribution: (data: repoData[]) => makeFieldDistributionArray(data, 'language'),
-    licenseDistribution: (data: repoData[]) => makeFieldDistributionArray(data, 'license'),
-    typeDistribution: (data: repoData[]) => makeFieldDistributionArray(data, 'typePredictionGpt5Mini'),
-    communityFilesPresence: (data: repoData[]) =>
-        makeFieldsNotNullArray(data, [
+    totalRepos: (rows: repoData[]) => rows.length,
+    withLicense: (rows: repoData[]) => getCountFieldNotNull(rows, 'license'),
+    percentWithLicense: (rows: repoData[]) => getPercentFieldNotNull(rows, 'license'),
+    totalContributors: (rows: repoData[]) => getSum(rows, 'contributorCount'),
+    avgBusFactor: (rows: repoData[]) => getAvg(rows, 'busFactor'),
+    reposPerUniversity: (rows: repoData[]) => makeCountsArray(rows, 'university'),
+    languageDistribution: (rows: repoData[]) => makeFieldDistributionArray(rows, 'language'),
+    licenseDistribution: (rows: repoData[]) => makeFieldDistributionArray(rows, 'license'),
+    typeDistribution: (rows: repoData[]) => makeFieldDistributionArray(rows, 'typePredictionGpt5Mini'),
+    communityFilesPresence: (rows: repoData[]) =>
+        makeFieldsNotNullArray(rows, [
             'issueTemplates',
             'securityPolicy',
             'codeOfConductFile',
@@ -40,28 +40,30 @@ const SUB_ENDPOINTS = {
             'description',
             'readme',
         ]),
-    languageDistributionByType: (data: repoData[]) =>
-        makeFieldDistributionByArray(data, 'language', 'typePredictionGpt5Mini'),
-    licenseDistributionByType: (data: repoData[]) =>
-        makeFieldDistributionByArray(data, 'license', 'typePredictionGpt5Mini'),
-} satisfies Partial<Record<keyof RespOverview, (data: repoData[]) => Resp[string]>>;
+    languageDistributionByType: (rows: repoData[]) =>
+        makeFieldDistributionByArray(rows, 'language', 'typePredictionGpt5Mini'),
+    licenseDistributionByType: (rows: repoData[]) =>
+        makeFieldDistributionByArray(rows, 'license', 'typePredictionGpt5Mini'),
+} satisfies { [K in keyof RespOverview]: (rows: repoData[]) => RespOverview[K] };
+
+const endpoints = Object.keys(SUB_ENDPOINTS) as (keyof RespOverview)[];
+
+function makeResponse(rows: repoData[]): RespOverview {
+    return Object.fromEntries(endpoints.map((endpoint) => [endpoint, SUB_ENDPOINTS[endpoint](rows)])) as RespOverview;
+}
 
 // Register primary GET response: build and return full RespOverview object
 router.get(BASE_OVERVIEW, (req, res) => {
     const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
-    res.json(
-        Object.fromEntries(
-            Object.entries(SUB_ENDPOINTS).map(([endpoint, fn]) => [endpoint, fn(filtered) as RespOverview]),
-        ),
-    );
+    res.json(makeResponse(filtered));
 });
 
-// Register sub GET responses for each field
-// (e.g. /overview/totalRepos returns only the return value of getUniqueCount(data))
-for (const [endpoint, fn] of Object.entries(SUB_ENDPOINTS)) {
+// Register sub GET responses for each endpoint.
+for (const endpoint of endpoints) {
     router.get(`${BASE_OVERVIEW}/${endpoint}`, (req, res) => {
         const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
-        res.json({ [endpoint]: fn(filtered) as RespOverview });
+        const value = SUB_ENDPOINTS[endpoint](filtered);
+        res.json({ [endpoint]: value });
     });
 }
 

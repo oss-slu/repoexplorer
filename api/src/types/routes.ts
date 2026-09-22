@@ -4,36 +4,33 @@ export type nameValueArr = nameValue[];
 export type nameMultiVal = { name: string; [key: string]: string | number };
 export type nameMultiValArr = nameMultiVal[];
 
-// base API response type for providing data for React/Recharts frontend to ingest
-export type Resp = { [key: string]: number | nameValueArr | nameMultiValArr };
-
 // /overview route base type
 export type RespOverview = {
-    totalRepos?: number;
-    withLicense?: number;
-    percentWithLicense?: number;
-    totalContributors?: number;
-    avgBusFactor?: number;
-    reposPerUniversity?: nameValueArr;
-    languageDistribution?: nameValueArr;
-    licenseDistribution?: nameValueArr;
-    typeDistribution?: nameValueArr;
-    communityFilesPresence?: nameValueArr;
-    languageDistributionByType?: nameMultiValArr;
-    licenseDistributionByType?: nameMultiValArr;
+    totalRepos: number;
+    withLicense: number;
+    percentWithLicense: number;
+    totalContributors: number;
+    avgBusFactor: number;
+    reposPerUniversity: nameValueArr;
+    languageDistribution: nameValueArr;
+    licenseDistribution: nameValueArr;
+    typeDistribution: nameValueArr;
+    communityFilesPresence: nameValueArr;
+    languageDistributionByType: nameMultiValArr;
+    licenseDistributionByType: nameMultiValArr;
 };
 
 // /impact route base type
-export type RespImpact = Resp & {
-    totalStars?: number;
-    totalForks?: number;
-    totalDownloads?: number;
-    totalContributors?: number;
-    impactIndicatorsPerUniversity?: nameMultiValArr;
-    starsDistribution?: nameValueArr;
-    forksDistribution?: nameValueArr;
-    releaseDownloadsDistribution?: nameValueArr;
-    contributorsDistribution?: nameValueArr;
+export type RespImpact = {
+    totalStars: number;
+    totalForks: number;
+    totalDownloads: number;
+    totalContributors: number;
+    impactIndicatorsPerUniversity: nameMultiValArr;
+    starsDistribution: nameValueArr;
+    forksDistribution: nameValueArr;
+    releaseDownloadsDistribution: nameValueArr;
+    contributorsDistribution: nameValueArr;
 };
 
 // /sustainability route base type
@@ -77,17 +74,17 @@ export type respSustainability = {
 
 // /security route base type
 export type RespSecurity = {
-    securityScorecardByRepo?: secrData[];
-    avgScorePerMetric?: nameValueArr;
+    securityScorecardByRepo: secrData[];
+    avgScorePerMetric: nameValueArr;
 };
 
 // /organization route base type
 export type RespOrganization = {
-    totalOrganizations?: number;
-    percentOrganizationsURL?: number;
-    percentOrganizationsDescription?: number;
-    percentOrganizationsEmail?: number;
-    orgsPerUniversity?: nameValueArr;
-    orgsCreatedPerYear?: nameValueArr;
-    profileCompleteness?: nameValueArr;
+    totalOrganizations: number;
+    percentOrganizationsURL: number;
+    percentOrganizationsDescription: number;
+    percentOrganizationsEmail: number;
+    orgsPerUniversity: nameValueArr;
+    orgsCreatedPerYear: nameValueArr;
+    profileCompleteness: nameValueArr;
 };
