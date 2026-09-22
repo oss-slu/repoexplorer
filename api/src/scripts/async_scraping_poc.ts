@@ -30,10 +30,26 @@ const HEADERS: Record<string, string> = {
 // In the real pipeline this list would be contributors pulled from a
 // repository's /contributors endpoint.
 const SAMPLE_USERNAMES = [
-    'torvalds', 'gvanrossum', 'yyx990803', 'sindresorhus', 'tj',
-    'addyosmani', 'gaearon', 'kentcdodds', 'defunkt', 'mojombo',
-    'pjhyett', 'wycats', 'ezmobius', 'ivey', 'evanphx',
-    'vanpelt', 'wayneeseguin', 'brynary', 'kevinclark', 'technoweenie',
+    'torvalds',
+    'gvanrossum',
+    'yyx990803',
+    'sindresorhus',
+    'tj',
+    'addyosmani',
+    'gaearon',
+    'kentcdodds',
+    'defunkt',
+    'mojombo',
+    'pjhyett',
+    'wycats',
+    'ezmobius',
+    'ivey',
+    'evanphx',
+    'vanpelt',
+    'wayneeseguin',
+    'brynary',
+    'kevinclark',
+    'technoweenie',
 ];
 
 interface ContributorDetails {
@@ -49,9 +65,7 @@ interface ContributorDetails {
 // until the previous one has fully completed — the same behavior as
 // repofinder's blocking `requests.get()` loop.
 
-async function getContributorDetailsSequential(
-    username: string,
-): Promise<ContributorDetails | null> {
+async function getContributorDetailsSequential(username: string): Promise<ContributorDetails | null> {
     const url = `https://api.github.com/users/${username}`;
     try {
         const response = await fetch(url, { headers: HEADERS });
@@ -67,9 +81,7 @@ async function getContributorDetailsSequential(
     }
 }
 
-async function runSequential(
-    usernames: string[],
-): Promise<{ results: ContributorDetails[]; elapsedMs: number }> {
+async function runSequential(usernames: string[]): Promise<{ results: ContributorDetails[]; elapsedMs: number }> {
     const start = performance.now();
     const results: ContributorDetails[] = [];
     for (const username of usernames) {
@@ -86,9 +98,7 @@ async function runSequential(
 // Same fetch logic, but every request is kicked off together and awaited as
 // a batch with Promise.all(), so the wait time overlaps instead of stacking.
 
-async function getContributorDetailsConcurrent(
-    username: string,
-): Promise<ContributorDetails | null> {
+async function getContributorDetailsConcurrent(username: string): Promise<ContributorDetails | null> {
     const url = `https://api.github.com/users/${username}`;
     try {
         const response = await fetch(url, { headers: HEADERS });
@@ -104,13 +114,9 @@ async function getContributorDetailsConcurrent(
     }
 }
 
-async function runConcurrent(
-    usernames: string[],
-): Promise<{ results: ContributorDetails[]; elapsedMs: number }> {
+async function runConcurrent(usernames: string[]): Promise<{ results: ContributorDetails[]; elapsedMs: number }> {
     const start = performance.now();
-    const settled = await Promise.all(
-        usernames.map((username) => getContributorDetailsConcurrent(username)),
-    );
+    const settled = await Promise.all(usernames.map((username) => getContributorDetailsConcurrent(username)));
     const results = settled.filter((r): r is ContributorDetails => r !== null);
     const elapsedMs = performance.now() - start;
     return { results, elapsedMs };
@@ -124,7 +130,7 @@ async function main() {
     if (!GITHUB_TOKEN) {
         console.log(
             'Warning: no GITHUB_TOKEN found. Requests will be unauthenticated ' +
-                'and may hit GitHub\'s low rate limit (60/hour) quickly.\n',
+                "and may hit GitHub's low rate limit (60/hour) quickly.\n",
         );
     }
 
@@ -132,15 +138,11 @@ async function main() {
 
     console.log('Running sequential version (current repofinder pattern)...');
     const seq = await runSequential(SAMPLE_USERNAMES);
-    console.log(
-        `  -> ${seq.results.length} succeeded in ${(seq.elapsedMs / 1000).toFixed(2)}s\n`,
-    );
+    console.log(`  -> ${seq.results.length} succeeded in ${(seq.elapsedMs / 1000).toFixed(2)}s\n`);
 
     console.log('Running concurrent version (proposed fetch + Promise.all)...');
     const conc = await runConcurrent(SAMPLE_USERNAMES);
-    console.log(
-        `  -> ${conc.results.length} succeeded in ${(conc.elapsedMs / 1000).toFixed(2)}s\n`,
-    );
+    console.log(`  -> ${conc.results.length} succeeded in ${(conc.elapsedMs / 1000).toFixed(2)}s\n`);
 
     if (conc.elapsedMs > 0) {
         const speedup = seq.elapsedMs / conc.elapsedMs;
