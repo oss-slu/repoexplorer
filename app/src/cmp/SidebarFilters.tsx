@@ -1,32 +1,27 @@
 import { useState } from 'react';
+import type { sidebarFiltersProps } from '../types/filters';
 import SliderFilter from './filters/SliderFilter';
 import TextDropdownFilter from './filters/TextDropdownFilter';
 
-type SliderFilterConfig = {
-    key: string;
-    label: string;
-    type: 'slider';
-    min: number;
-    max: number;
-};
+export default function SidebarFilters({ filters }: sidebarFiltersProps) {
+    const getDefaultValues = () => {
+        const defaultValues: Record<string, string | number> = {};
 
-type TextFilterConfig = {
-    key: string;
-    label: string;
-    type: 'text';
-    options: string[];
-};
+        filters.forEach((filter) => {
+            if (filter.type === 'slider') {
+                defaultValues[filter.key] = filter.defaultValue ?? 0;
+            } else {
+                defaultValues[filter.key] =
+                    filter.defaultValue ?? filter.options[0] ?? '';
+            }
+        });
 
-type FilterConfig = SliderFilterConfig | TextFilterConfig;
+        return defaultValues;
+    };
 
-type SidebarFiltersProps = {
-    filters: FilterConfig[];
-};
-
-export default function SidebarFilters({ filters }: SidebarFiltersProps) {
     const [filterValues, setFilterValues] = useState<
         Record<string, string | number>
-    >({});
+    >(getDefaultValues());
 
     return (
         <aside>
@@ -43,7 +38,7 @@ export default function SidebarFilters({ filters }: SidebarFiltersProps) {
                             value={
                                 typeof currentValue === 'number'
                                     ? currentValue
-                                    : filter.min
+                                    : filter.defaultValue ?? 0
                             }
                             onChange={(value) =>
                                 setFilterValues((previousValues) => ({
@@ -61,7 +56,9 @@ export default function SidebarFilters({ filters }: SidebarFiltersProps) {
                         label={filter.label}
                         options={filter.options}
                         value={
-                            typeof currentValue === 'string' ? currentValue : ''
+                            typeof currentValue === 'string'
+                                ? currentValue
+                                : filter.defaultValue ?? filter.options[0] ?? ''
                         }
                         onChange={(value) =>
                             setFilterValues((previousValues) => ({
@@ -73,7 +70,10 @@ export default function SidebarFilters({ filters }: SidebarFiltersProps) {
                 );
             })}
 
-            <button type="button" onClick={() => setFilterValues({})}>
+            <button
+                type="button"
+                onClick={() => setFilterValues(getDefaultValues())}
+            >
                 Reset
             </button>
         </aside>

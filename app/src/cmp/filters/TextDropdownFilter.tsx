@@ -1,16 +1,11 @@
-type TextDropdownFilterProps = {
-    label: string;
-    options: string[];
-    value: string;
-    onChange: (value: string) => void;
-};
+import type { textDropdownFilterProps } from '../../types/filters';
 
 export default function TextDropdownFilter({
     label,
     options,
     value,
     onChange,
-}: TextDropdownFilterProps) {
+}: textDropdownFilterProps) {
     const filteredOptions = options.filter((option) =>
         option.toLowerCase().includes(value.toLowerCase()),
     );

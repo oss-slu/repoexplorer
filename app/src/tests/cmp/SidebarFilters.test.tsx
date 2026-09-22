@@ -30,6 +30,66 @@ describe('SidebarFilters', () => {
         ).toBeInTheDocument();
     });
 
+    it('uses the provided default values', () => {
+        const filtersWithDefaults = [
+            {
+                key: 'stars',
+                label: 'Stars',
+                type: 'slider' as const,
+                min: 0,
+                max: 100,
+                defaultValue: 25,
+            },
+            {
+                key: 'language',
+                label: 'Language',
+                type: 'text' as const,
+                options: ['JavaScript', 'Python', 'Java'],
+                defaultValue: 'Python',
+            },
+        ];
+
+        render(<SidebarFilters filters={filtersWithDefaults} />);
+
+        expect(screen.getByText('Stars: 25')).toBeInTheDocument();
+        expect(screen.getByRole('combobox')).toHaveValue('Python');
+    });
+
+    it('resets to the provided default values', () => {
+        const filtersWithDefaults = [
+            {
+                key: 'stars',
+                label: 'Stars',
+                type: 'slider' as const,
+                min: 0,
+                max: 100,
+                defaultValue: 25,
+            },
+            {
+                key: 'language',
+                label: 'Language',
+                type: 'text' as const,
+                options: ['JavaScript', 'Python', 'Java'],
+                defaultValue: 'Python',
+            },
+        ];
+
+        render(<SidebarFilters filters={filtersWithDefaults} />);
+
+        fireEvent.change(screen.getByRole('slider'), {
+            target: { value: '50' },
+        });
+
+        fireEvent.change(screen.getByRole('combobox'), {
+            target: { value: 'Java' },
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+
+        expect(screen.getByText('Stars: 25')).toBeInTheDocument();
+        expect(screen.getByRole('combobox')).toHaveValue('Python');
+    });
+
     it('updates the filter values when they change', () => {
         render(<SidebarFilters filters={filters} />);
 
@@ -60,6 +120,6 @@ describe('SidebarFilters', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
 
         expect(screen.getByText('Stars: 0')).toBeInTheDocument();
-        expect(screen.getByRole('combobox')).toHaveValue('');
+        expect(screen.getByRole('combobox')).toHaveValue('JavaScript');
     });
 });

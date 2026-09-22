@@ -1,10 +1,4 @@
-type SliderFilterProps = {
-    label: string;
-    min: number;
-    max: number;
-    value: number;
-    onChange: (value: number) => void;
-};
+import type { sliderFilterProps } from '../../types/filters';
 
 export default function SliderFilter({
     label,
@@ -12,7 +6,7 @@ export default function SliderFilter({
     max,
     value,
     onChange,
-}: SliderFilterProps) {
+}: sliderFilterProps) {
     return (
         <div>
             <label>
