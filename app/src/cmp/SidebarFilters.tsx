@@ -19,9 +19,8 @@ export default function SidebarFilters({ filters }: sidebarFiltersProps) {
         return defaultValues;
     };
 
-    const [filterValues, setFilterValues] = useState<
-        Record<string, string | number>
-    >(getDefaultValues());
+    const [filterValues, setFilterValues] =
+        useState<Record<string, string | number>>(getDefaultValues());
 
     return (
         <aside>
@@ -38,7 +37,7 @@ export default function SidebarFilters({ filters }: sidebarFiltersProps) {
                             value={
                                 typeof currentValue === 'number'
                                     ? currentValue
-                                    : filter.defaultValue ?? 0
+                                    : (filter.defaultValue ?? 0)
                             }
                             onChange={(value) =>
                                 setFilterValues((previousValues) => ({
@@ -58,7 +57,9 @@ export default function SidebarFilters({ filters }: sidebarFiltersProps) {
                         value={
                             typeof currentValue === 'string'
                                 ? currentValue
-                                : filter.defaultValue ?? filter.options[0] ?? ''
+                                : (filter.defaultValue ??
+                                  filter.options[0] ??
+                                  '')
                         }
                         onChange={(value) =>
                             setFilterValues((previousValues) => ({
