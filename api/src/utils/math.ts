@@ -33,19 +33,13 @@ export function getAvailableAvg(rows: repoData[], field: keyof repoData): number
 }
 
 // Return the number of rows where the value in field is not null
-export function getCountFieldNotNull<T extends Record<string, unknown>> (
-    rows: T[],
-    field: keyof T
-): number {
+export function getCountFieldNotNull<T extends Record<string, unknown>>(rows: T[], field: keyof T): number {
     if (rows.length === 0) return 0;
-    return rows.filter((row) => row[field]  !== null && row[field] !== undefined).length;
+    return rows.filter((row) => row[field] !== null && row[field] !== undefined).length;
 }
 
 // Return the number of rows where the value of the passed field is not null
-export function getPercentFieldNotNull<T extends Record<string, unknown>> (
-    rows: T[],
-    field: keyof T
-): number {
+export function getPercentFieldNotNull<T extends Record<string, unknown>>(rows: T[], field: keyof T): number {
     if (rows.length === 0) return 0;
     return (getCountFieldNotNull(rows, field) / rows.length) * 100;
 }
@@ -56,10 +50,7 @@ export function makeFieldsNotNullArray(rows: repoData[], fields: (keyof repoData
 }
 
 // Return count of rows grouped by field. If field is not passed, return total length
-function getCountsByField<T extends Record<string, unknown>> (
-    rows: T[],
-    field?: keyof T
-): Record<string, number> {
+function getCountsByField<T extends Record<string, unknown>>(rows: T[], field?: keyof T): Record<string, number> {
     if (!field) return { total: rows.length };
 
     const counts: Record<string, number> = {};
@@ -100,10 +91,7 @@ export function makeFieldDistributionByArray(rows: repoData[], field: keyof repo
 }
 
 // Return array of counts of rows grouped by field
-export function makeCountsArray<T extends Record<string, unknown>> (
-    rows: T[],
-    field?: keyof T
-): nameValueArr {
+export function makeCountsArray<T extends Record<string, unknown>>(rows: T[], field?: keyof T): nameValueArr {
     const counts = getCountsByField(rows, field);
     return makeNameValueArr(counts);
 }
@@ -148,7 +136,6 @@ export function makeImpactIndicatorsArray(rows: repoData[]) {
     >();
 
     for (const row of rows) {
-
         const current = totals.get(row.university) ?? {
             name: row.university,
             stars: 0,
@@ -369,7 +356,7 @@ export function makeAvgScorePerMetricArray(rows: secrData[]): nameValueArr {
 export function makeDateDistributionArray(rows: orgsData[], field: keyof orgsData) {
     const distribution = [];
 
-    for(let year = 2008; year <= 2026; year++) {
+    for (let year = 2008; year <= 2026; year++) {
         distribution.push({
             name: String(year),
             value: rows.filter((row) => {
@@ -393,7 +380,7 @@ export function makeProfileCompleteDistributionArray(rows: orgsData[]) {
 
         return {
             name: field,
-            value: rows.length ?(complete / rows.length) * 100: 0,
+            value: rows.length ? (complete / rows.length) * 100 : 0,
         };
     });
 }

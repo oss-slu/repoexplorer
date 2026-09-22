@@ -3,11 +3,11 @@ import { BASE_ORGANIZATION, FILTERABLE_ORGS_FIELDS } from '../consts';
 import type { RespOrganization } from '../types/routes';
 import type { orgsData } from '../types/appData';
 import sampleOrgsData from '../../data/sample/sampleOrgsData.json';
-import { 
-    getPercentFieldNotNull, 
-    makeCountsArray, 
-    makeDateDistributionArray, 
-    makeProfileCompleteDistributionArray 
+import {
+    getPercentFieldNotNull,
+    makeCountsArray,
+    makeDateDistributionArray,
+    makeProfileCompleteDistributionArray,
 } from '../utils/math';
 import { filterData } from '../utils/filter';
 

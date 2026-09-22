@@ -26,19 +26,19 @@ describe('GET /organization', () => {
         expect(res.body.orgsPerUniversity[0]).toEqual(
             expect.objectContaining({
                 name: expect.any(String),
-                value: expect.any(Number)
+                value: expect.any(Number),
             }),
         );
         expect(res.body.orgsCreatedPerYear[0]).toEqual(
             expect.objectContaining({
                 name: expect.any(String),
-                value: expect.any(Number)
+                value: expect.any(Number),
             }),
         );
         expect(res.body.profileCompleteness[0]).toEqual(
             expect.objectContaining({
                 name: expect.any(String),
-                value: expect.any(Number)
+                value: expect.any(Number),
             }),
         );
     });
@@ -110,7 +110,7 @@ describe('GET /organization', () => {
                 { name: 'location', value: 0 },
                 { name: 'description', value: 0 },
                 { name: 'email', value: 0 },
-                { name: 'company', value: 0 }
+                { name: 'company', value: 0 },
             ],
         };
 

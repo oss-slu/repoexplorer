@@ -14,7 +14,7 @@ export const ROUTES = [
     { router: impact, route: '/impact' },
     { router: security, route: '/security' },
     { router: sustainability, route: BASE_SUSTAINABILITY },
-    { router: organization, route: '/organization' }
+    { router: organization, route: '/organization' },
 ];
 
 export function createApp(origin?: string) {
