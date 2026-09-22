@@ -3,12 +3,12 @@ import { vi } from 'vitest';
 import TextDropdownFilter from '../../../cmp/filters/TextDropdownFilter';
 
 describe('TextDropdownFilter', () => {
-    it('renders the label and input', () => {
+    it('renders the label and select', () => {
         render(
             <TextDropdownFilter
                 label="Language"
                 options={['JavaScript', 'Python', 'Java']}
-                value=""
+                value="JavaScript"
                 onChange={() => {}}
             />,
         );
@@ -17,14 +17,14 @@ describe('TextDropdownFilter', () => {
         expect(screen.getByRole('combobox')).toBeInTheDocument();
     });
 
-    it('calls onChange when the user types', () => {
+    it('calls onChange when the user selects an option', () => {
         const handleChange = vi.fn();
 
         render(
             <TextDropdownFilter
                 label="Language"
                 options={['JavaScript', 'Python', 'Java']}
-                value=""
+                value="JavaScript"
                 onChange={handleChange}
             />,
         );
@@ -36,22 +36,26 @@ describe('TextDropdownFilter', () => {
         expect(handleChange).toHaveBeenCalledWith('Python');
     });
 
-    it('filters the suggested options based on the current value', () => {
-        const { container } = render(
+    it('renders the provided options', () => {
+        render(
             <TextDropdownFilter
                 label="Language"
                 options={['JavaScript', 'Python', 'Java']}
-                value="Java"
+                value="JavaScript"
                 onChange={() => {}}
             />,
         );
 
-        const options = Array.from(
-            container.querySelectorAll('datalist option'),
-        ).map((option) => option.getAttribute('value'));
+        expect(
+            screen.getByRole('option', { name: 'JavaScript' }),
+        ).toBeInTheDocument();
 
-        expect(options).toContain('JavaScript');
-        expect(options).toContain('Java');
-        expect(options).not.toContain('Python');
+        expect(
+            screen.getByRole('option', { name: 'Python' }),
+        ).toBeInTheDocument();
+
+        expect(
+            screen.getByRole('option', { name: 'Java' }),
+        ).toBeInTheDocument();
     });
 });

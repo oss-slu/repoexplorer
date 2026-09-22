@@ -6,26 +6,20 @@ export default function TextDropdownFilter({
     value,
     onChange,
 }: textDropdownFilterProps) {
-    const filteredOptions = options.filter((option) =>
-        option.toLowerCase().includes(value.toLowerCase()),
-    );
-
     return (
         <div>
             <label>{label}</label>
 
-            <input
-                type="text"
+            <select
                 value={value}
                 onChange={(event) => onChange(event.target.value)}
-                list={`${label}-options`}
-            />
-
-            <datalist id={`${label}-options`}>
-                {filteredOptions.map((option) => (
-                    <option key={option} value={option} />
+            >
+                {options.map((option) => (
+                    <option key={option} value={option}>
+                        {option}
+                    </option>
                 ))}
-            </datalist>
+            </select>
         </div>
     );
 }
