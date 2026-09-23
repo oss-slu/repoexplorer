@@ -303,7 +303,7 @@ describe('math utilities', () => {
                     forksCount: 2,
                     releaseDownloads: null as any,
                     contributorCount: undefined,
-                })
+                }),
             ];
 
             expect(makeImpactIndicatorsArray(rows)).toEqual([

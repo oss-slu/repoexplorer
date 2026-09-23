@@ -10,30 +10,26 @@ const data = sampleData as secrData[];
 const router = Router();
 
 const SUB_ENDPOINTS = {
-    securityScorecardByRepo: (data: secrData[]) => data,
-    avgScorePerMetric: (data: secrData[]) => makeAvgScorePerMetricArray(data),
-} satisfies Partial<Record<keyof RespSecurity, (data: secrData[]) => RespSecurity[keyof RespSecurity]>>;
+    securityScorecardByRepo: (rows: secrData[]) => rows,
+    avgScorePerMetric: (rows: secrData[]) => makeAvgScorePerMetricArray(rows),
+} satisfies { [K in keyof RespSecurity]: (rows: secrData[]) => RespSecurity[K] };
+
+const endpoints = Object.keys(SUB_ENDPOINTS) as (keyof RespSecurity)[];
+
+function makeResponse(rows: secrData[]): RespSecurity {
+    return Object.fromEntries(endpoints.map((endpoint) => [endpoint, SUB_ENDPOINTS[endpoint](rows)])) as RespSecurity;
+}
 
 router.get(BASE_SECURITY, (req, res) => {
     const filtered = filterData(data, req.query, FILTERABLE_SECR_FIELDS);
-
-    res.json(
-        Object.fromEntries(
-            Object.entries(SUB_ENDPOINTS).map(([endpoint, fn]) => [
-                endpoint,
-                fn(filtered) as RespSecurity[keyof RespSecurity],
-            ]),
-        ),
-    );
+    res.json(makeResponse(filtered));
 });
 
-for (const [endpoint, fn] of Object.entries(SUB_ENDPOINTS)) {
+for (const endpoint of endpoints) {
     router.get(`${BASE_SECURITY}/${endpoint}`, (req, res) => {
         const filtered = filterData(data, req.query, FILTERABLE_SECR_FIELDS);
-
-        res.json({
-            [endpoint]: fn(filtered) as RespSecurity[keyof RespSecurity],
-        });
+        const value = SUB_ENDPOINTS[endpoint](filtered);
+        res.json({ [endpoint]: value });
     });
 }
 
