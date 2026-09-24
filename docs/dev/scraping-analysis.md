@@ -52,7 +52,6 @@ With 30+ universities and hundreds of repos each, the total sequential round-tri
 
 ## Proof-of-Concept
 
-`/api/src/scripts/async_scraping_poc.ts` compares sequential vs. concurrent fetching of GitHub user details (mirroring `get_contributor_details`) for 20 usernames, using TypeScript's `fetch()` and `Promise.all()`.
+`/api/src/scripts/asyncScrapingPoc.ts` runs a scaled-down version of the real scraping pipeline for one university (`SLU`): searching GitHub for matching repositories, organizations, and users, then fetching every found org's/user's repositories — first sequentially, then concurrently with `Promise.all()`, using an authenticated `GITHUB_TOKEN`.
 
-**Result:** 
-~2.57s sequential vs. ~0.36s concurrent — ~7.2x speedup on this small sample (run unauthenticated, without a `GITHUB_TOKEN`; results may vary with authenticated requests). Real-world speedup on the full pipeline should be larger, given thousands of calls per university in production.
+**Result:** ~719.8s (12 minutes) sequential vs. ~9.0s concurrent to fetch 16,000+ owner repositories across 1,682 organizations and users — roughly an **80x speedup**. This is a much closer approximation of real pipeline behavior than a small synthetic sample, and gives a concrete sense of what a fully async rebuild could achieve: work that currently takes over 12 minutes for a single university's owner-repo fetch step alone could plausibly complete in under 10 seconds.

@@ -1,1 +1,0 @@
-{"root":["./src/consts.ts","./src/main.tsx","./src/cmp/app.tsx","./src/cmp/charts/barchartdiv.tsx","./src/cmp/charts/datablock.tsx","./src/cmp/charts/piechartdiv.tsx","./src/tests/setup.ts","./src/tests/cmp/charts/datablock.test.tsx","./src/tests/cmp/charts/piechartdiv.test.tsx","./src/types/charts.ts","./vite.config.ts"],"version":"6.0.3"}
