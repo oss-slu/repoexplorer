@@ -27,8 +27,7 @@ function getNextLink(headers: Headers): string | null {
 
 async function githubSearch(endpoint: 'repositories' | 'users', query: string) {
     const items: any[] = [];
-    let url: string | null =
-        `https://api.github.com/search/${endpoint}?q=${encodeURIComponent(query)}&per_page=100`;
+    let url: string | null = `https://api.github.com/search/${endpoint}?q=${encodeURIComponent(query)}&per_page=100`;
 
     while (url) {
         const response: Response = await fetch(url, { headers: HEADERS });
@@ -44,10 +43,9 @@ async function githubSearch(endpoint: 'repositories' | 'users', query: string) {
 async function fetchReposForOwnerSequential(owners: { login: string }[]) {
     const repos: string[] = [];
     for (const owner of owners) {
-        const response = await fetch(
-            `https://api.github.com/users/${owner.login}/repos?per_page=100`,
-            { headers: HEADERS },
-        );
+        const response = await fetch(`https://api.github.com/users/${owner.login}/repos?per_page=100`, {
+            headers: HEADERS,
+        });
         if (!response.ok) continue;
         const data = await response.json();
         repos.push(...data.map((r: any) => r.full_name));
@@ -58,10 +56,9 @@ async function fetchReposForOwnerSequential(owners: { login: string }[]) {
 async function fetchReposForOwnerConcurrent(owners: { login: string }[]) {
     const results = await Promise.all(
         owners.map(async (owner) => {
-            const response = await fetch(
-                `https://api.github.com/users/${owner.login}/repos?per_page=100`,
-                { headers: HEADERS },
-            );
+            const response = await fetch(`https://api.github.com/users/${owner.login}/repos?per_page=100`, {
+                headers: HEADERS,
+            });
             if (!response.ok) return [];
             const data = await response.json();
             return data.map((r: any) => r.full_name);
@@ -93,9 +90,7 @@ async function scrapeUniversity(mode: 'sequential' | 'concurrent') {
     const owners = [...orgResults, ...userResults].map((o) => ({ login: o.login }));
 
     const ownerRepos =
-        mode === 'concurrent'
-            ? await fetchReposForOwnerConcurrent(owners)
-            : await fetchReposForOwnerSequential(owners);
+        mode === 'concurrent' ? await fetchReposForOwnerConcurrent(owners) : await fetchReposForOwnerSequential(owners);
 
     return {
         elapsedMs: performance.now() - start,
