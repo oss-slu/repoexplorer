@@ -7,7 +7,7 @@ import {
     ResponsiveContainer,
     Tooltip,
     XAxis,
-    YAxis, 
+    YAxis,
 } from 'recharts';
 import { API_URL, PIE_COLORS } from '../../consts';
 import type { barDatum, chartProps } from '../../types/charts';
@@ -33,8 +33,9 @@ export default function BarChartDiv({
                     throw new Error(`Failed to fetch data from ${endpoint}`);
                 }
 
-              const json = await res.json();
-              const arr: barDatum[] = Object.values(json)[0] as barDatum[];              setData(arr);
+                const json = await res.json();
+                const arr: barDatum[] = Object.values(json)[0] as barDatum[];
+                setData(arr);
             } catch (err) {
                 setError(
                     err instanceof Error ? err.message : 'Failed to load data',

@@ -2,9 +2,15 @@ import type { ReactNode } from 'react';
 
 export type pieSlice = { name: string; value: number; fill?: string };
 
-export type chartProps = { title?: string; endpoint?: string; stacked?: boolean; seriesKeys?: string[]; seriesLabels?: string[]};
+export type chartProps = {
+    title?: string;
+    endpoint?: string;
+    stacked?: boolean;
+    seriesKeys?: string[];
+    seriesLabels?: string[];
+};
 
-export type barDatum = { 
+export type barDatum = {
     name: string;
     [key: string]: string | number;
 };

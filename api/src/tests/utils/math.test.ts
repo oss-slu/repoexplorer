@@ -1,7 +1,7 @@
-import { 
-    getSum, 
+import {
+    getSum,
     getAvg,
-    getCountFieldNotNull, 
+    getCountFieldNotNull,
     getPercentFieldNotNull,
     makeFieldsNotNullArray,
     makeFieldDistributionArray,
@@ -13,7 +13,6 @@ import {
 } from '../../utils/math';
 
 import type { repoData, secrData } from '../../types/appData';
-
 
 const makeRepo = (overrides: Partial<repoData> = {}): repoData => ({
     university: 'SLU',
@@ -79,20 +78,13 @@ const makeSecurity = (overrides: Partial<secrData> = {}): secrData => ({
 describe('math utilities', () => {
     describe('getSum', () => {
         it('sums numeric values', () => {
-            const rows = [
-                makeRepo({ size: 10 }),
-                makeRepo({ size: 20 }),
-                makeRepo({ size: 5 }),
-            ];
+            const rows = [makeRepo({ size: 10 }), makeRepo({ size: 20 }), makeRepo({ size: 5 })];
 
             expect(getSum(rows, 'size')).toBe(35);
         });
 
         it('ignores non-numeric values', () => {
-            const rows = [
-                makeRepo({ description: 'hello' }),
-                makeRepo({ description: null }),
-            ];
+            const rows = [makeRepo({ description: 'hello' }), makeRepo({ description: null })];
 
             expect(getSum(rows, 'description')).toBe(0);
         });
@@ -100,11 +92,7 @@ describe('math utilities', () => {
 
     describe('getAvg', () => {
         it('calculates the average', () => {
-            const rows = [
-                makeRepo({ size: 10 }),
-                makeRepo({ size: 20 }),
-                makeRepo({ size: 30 }),
-            ];
+            const rows = [makeRepo({ size: 10 }), makeRepo({ size: 20 }), makeRepo({ size: 30 })];
 
             expect(getAvg(rows, 'size')).toBe(20);
         });
@@ -157,9 +145,7 @@ describe('math utilities', () => {
                 }),
             ];
 
-            expect(
-                makeFieldsNotNullArray(rows, ['description', 'homepage'])
-            ).toEqual([
+            expect(makeFieldsNotNullArray(rows, ['description', 'homepage'])).toEqual([
                 { name: 'description', value: 50 },
                 { name: 'homepage', value: 50 },
             ]);
@@ -206,13 +192,7 @@ describe('math utilities', () => {
                 }),
             ];
 
-            expect(
-                makeFieldDistributionByArray(
-                    rows,
-                    'university',
-                    'language'
-                )
-            ).toEqual([
+            expect(makeFieldDistributionByArray(rows, 'university', 'language')).toEqual([
                 {
                     name: 'SLU',
                     TypeScript: 0.5,
@@ -226,13 +206,7 @@ describe('math utilities', () => {
         });
 
         it('returns an empty array for empty rows', () => {
-            expect(
-                makeFieldDistributionByArray(
-                    [],
-                    'university',
-                    'language'
-                )
-            ).toEqual([]);
+            expect(makeFieldDistributionByArray([], 'university', 'language')).toEqual([]);
         });
     });
 
@@ -251,9 +225,7 @@ describe('math utilities', () => {
         });
 
         it('returns total when no field is provided', () => {
-            expect(makeCountsArray([makeRepo(), makeRepo()])).toEqual([
-                { name: 'total', value: 2 },
-            ]);
+            expect(makeCountsArray([makeRepo(), makeRepo()])).toEqual([{ name: 'total', value: 2 }]);
         });
     });
 
@@ -343,27 +315,17 @@ describe('math utilities', () => {
 
             const result = makeAvgScorePerMetricArray(rows);
 
-            expect(
-                result.find(
-                    (item) => item.name === 'binaryArtifacts'
-                )
-            ).toEqual({
+            expect(result.find((item) => item.name === 'binaryArtifacts')).toEqual({
                 name: 'binaryArtifacts',
                 value: 2,
             });
 
-            expect(
-                result.find(
-                    (item) => item.name === 'branchProtection'
-                )
-            ).toEqual({
+            expect(result.find((item) => item.name === 'branchProtection')).toEqual({
                 name: 'branchProtection',
                 value: 1,
             });
 
-            expect(
-                result.some((item) => item.name === 'htmlUrl')
-            ).toBe(false);
+            expect(result.some((item) => item.name === 'htmlUrl')).toBe(false);
         });
 
         it('returns an empty array for empty rows', () => {
