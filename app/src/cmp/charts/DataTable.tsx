@@ -64,19 +64,37 @@ export default function DataTable({ title, endpoint }: chartProps) {
             ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
-                        <tr style={{ borderBottom: '2px solid #ddd', textAlign: 'left' }}>
+                        <tr
+                            style={{
+                                borderBottom: '2px solid #ddd',
+                                textAlign: 'left',
+                            }}
+                        >
                             {headers.map((header) => (
-                                <th key={header} style={{ padding: '12px 8px' }}>
-                                    {header === 'name' ? 'University' : header === 'value' ? 'Count' : header}
+                                <th
+                                    key={header}
+                                    style={{ padding: '12px 8px' }}
+                                >
+                                    {header === 'name'
+                                        ? 'University'
+                                        : header === 'value'
+                                          ? 'Count'
+                                          : header}
                                 </th>
                             ))}
                         </tr>
                     </thead>
                     <tbody>
                         {data.map((row, index) => (
-                            <tr key={index} style={{ borderBottom: '1px solid #eee' }}>
+                            <tr
+                                key={index}
+                                style={{ borderBottom: '1px solid #eee' }}
+                            >
                                 {headers.map((header) => (
-                                    <td key={header} style={{ padding: '12px 8px' }}>
+                                    <td
+                                        key={header}
+                                        style={{ padding: '12px 8px' }}
+                                    >
                                         {String(row[header] ?? '')}
                                     </td>
                                 ))}
