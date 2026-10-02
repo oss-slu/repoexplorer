@@ -90,7 +90,7 @@ function App() {
                             <div className="tab-view">
                                 {repoTab === 'Overview' && <Overview />}
                                 {repoTab === 'Security' && <Security />}
-                                {repoTab !== 'Overview' && 
+                                {repoTab !== 'Overview' &&
                                     repoTab !== 'Security' && (
                                         <div className="tab-placeholder">
                                             <p>{repoTab} Dashboard</p>
