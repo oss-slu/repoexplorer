@@ -89,8 +89,10 @@ function App() {
 
                             <div className="tab-view">
                                 {repoTab === 'Overview' && <Overview />}
-                                {repoTab === 'Sustainability' && <Sustainability />}
-                                {repoTab !== 'Overview' && 
+                                {repoTab === 'Sustainability' && (
+                                    <Sustainability />
+                                )}
+                                {repoTab !== 'Overview' &&
                                     repoTab !== 'Sustainability' && (
                                         <div className="tab-placeholder">
                                             <p>{repoTab} Dashboard</p>
