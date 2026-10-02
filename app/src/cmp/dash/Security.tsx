@@ -1,5 +1,5 @@
-import BarChartDiv from './charts/BarChartDiv';
-import DataTable from './charts/DataTable';
+import BarChartDiv from '../charts/BarChartDiv';
+import DataTable from '../charts/DataTable';
 
 export default function Security() {
     return (
