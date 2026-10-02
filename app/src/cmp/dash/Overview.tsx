@@ -70,12 +70,32 @@ export default function Overview() {
                 </div>
             </div>
 
-            <PieChartDiv title="Project Type Distribution" endpoint="overview/typeDistribution" />
-            <BarChartDiv title="Community Files Presence" endpoint="overview/communityFilesPresence" />
-            <PieChartDiv title="Language Distribution" endpoint="overview/languageDistribution" />
-            <PieChartDiv title="License Distribution" endpoint="overview/licenseDistribution" />
-            <BarChartDiv title="Language Distribution by Type" endpoint="overview/languageDistributionByType" stacked />
-            <BarChartDiv title="License Distribution by Type" endpoint="overview/licenseDistributionByType" stacked />
+            <PieChartDiv
+                title="Project Type Distribution"
+                endpoint="overview/typeDistribution"
+            />
+            <BarChartDiv
+                title="Community Files Presence"
+                endpoint="overview/communityFilesPresence"
+            />
+            <PieChartDiv
+                title="Language Distribution"
+                endpoint="overview/languageDistribution"
+            />
+            <PieChartDiv
+                title="License Distribution"
+                endpoint="overview/licenseDistribution"
+            />
+            <BarChartDiv
+                title="Language Distribution by Type"
+                endpoint="overview/languageDistributionByType"
+                stacked
+            />
+            <BarChartDiv
+                title="License Distribution by Type"
+                endpoint="overview/licenseDistributionByType"
+                stacked
+            />
         </div>
     );
 }

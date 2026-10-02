@@ -14,8 +14,16 @@ const QUEUE = runMode === 'EACH' ? ['REPO', 'SECR', 'ORGS'] : [runMode];
 
 // include only repos with these orgs as owner for sample repo data
 const SAMPLE_REPO_ORGS = [
-    'UC-OSPO-Network', 'oss-slu', 'uccross', 'sluseallab', 'SLURM-CLI-API-Proxy',
-    'Fossil-Free-UC-Santa-Cruz', 'OSS-PREY', 'Saint-Louis-University', 'UAVLab-SLU', 'slu-dss',
+    'UC-OSPO-Network',
+    'oss-slu',
+    'uccross',
+    'sluseallab',
+    'SLURM-CLI-API-Proxy',
+    'Fossil-Free-UC-Santa-Cruz',
+    'OSS-PREY',
+    'Saint-Louis-University',
+    'UAVLab-SLU',
+    'slu-dss',
 ];
 
 QUEUE.forEach(async (run) => {
@@ -26,8 +34,8 @@ QUEUE.forEach(async (run) => {
     );
 
     // filter to only sample repo data
-    const data = run === 'REPO'
-        ? (objs as repoData[]).filter((r) => SAMPLE_REPO_ORGS.includes(r.owner)) : objs.slice(0, 100);
+    const data =
+        run === 'REPO' ? (objs as repoData[]).filter((r) => SAMPLE_REPO_ORGS.includes(r.owner)) : objs.slice(0, 100);
 
     await writeFile(`data/sample/sample${capitalize(run)}Data.json`, JSON.stringify(data, null, 2));
 });
