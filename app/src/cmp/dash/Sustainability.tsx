@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { API_URL } from '../consts';
-import BarChartDiv from './charts/BarChartDiv';
-import DataBlock from './charts/DataBlock';
-import DataTable from './charts/DataTable';
+import { API_URL } from '../../consts';
+import BarChartDiv from '../charts/BarChartDiv';
+import DataBlock from '../charts/DataBlock';
+import DataTable from '../charts/DataTable';
 
 type communityFilesByStarsDatum = {
     name: string;
