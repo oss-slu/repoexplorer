@@ -41,16 +41,16 @@ export default function Overview() {
     }
 
     return (
-        <div className="overview-dashboard">
-            <div className="overview-top-row">
-                <div className="overview-table-col">
+        <div className="dashboard">
+            <div className="dashboard-top-row">
+                <div className="dashboard-table-col">
                     <DataTable
                         title="Repositories per University"
                         endpoint="overview/reposPerUniversity"
                     />
                 </div>
 
-                <div className="overview-summary-grid">
+                <div className="dashboard-summary-grid">
                     <DataBlock
                         header="Total repositories"
                         value={summary.totalRepos ?? 0}
@@ -70,32 +70,34 @@ export default function Overview() {
                 </div>
             </div>
 
-            <PieChartDiv
-                title="Project Type Distribution"
-                endpoint="overview/typeDistribution"
-            />
-            <BarChartDiv
-                title="Community Files Presence"
-                endpoint="overview/communityFilesPresence"
-            />
-            <PieChartDiv
-                title="Language Distribution"
-                endpoint="overview/languageDistribution"
-            />
-            <PieChartDiv
-                title="License Distribution"
-                endpoint="overview/licenseDistribution"
-            />
-            <BarChartDiv
-                title="Language Distribution by Type"
-                endpoint="overview/languageDistributionByType"
-                stacked
-            />
-            <BarChartDiv
-                title="License Distribution by Type"
-                endpoint="overview/licenseDistributionByType"
-                stacked
-            />
+            <div className="dashboard-chart-grid">
+                <PieChartDiv
+                    title="Project Type Distribution"
+                    endpoint="overview/typeDistribution"
+                />
+                <BarChartDiv
+                    title="Community Files Presence"
+                    endpoint="overview/communityFilesPresence"
+                />
+                <PieChartDiv
+                    title="Language Distribution"
+                    endpoint="overview/languageDistribution"
+                />
+                <PieChartDiv
+                    title="License Distribution"
+                    endpoint="overview/licenseDistribution"
+                />
+                <BarChartDiv
+                    title="Language Distribution by Type"
+                    endpoint="overview/languageDistributionByType"
+                    stacked
+                />
+                <BarChartDiv
+                    title="License Distribution by Type"
+                    endpoint="overview/licenseDistributionByType"
+                    stacked
+                />
+            </div>
         </div>
     );
 }

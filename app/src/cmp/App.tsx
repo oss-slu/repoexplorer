@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import NavBar from './NavBar';
 import Overview from './dash/Overview';
+import Security from './dash/Security';
+import Sustainability from './dash/Sustainability';
 import aboutText from '../../../docs/about.md?raw';
 import Markdown from 'react-markdown';
 import SidebarFilters from './SidebarFilters';
@@ -88,10 +90,16 @@ function App() {
 
                             <div className="tab-view">
                                 {repoTab === 'Overview' && <Overview />}
-                                {repoTab !== 'Overview' && (
-                                    <div className="tab-placeholder">
-                                        <p>{repoTab} Dashboard</p>
-                                    </div>
+                                {repoTab === 'Security' && <Security />}
+                                {repoTab === 'Sustainability' && (
+                                    <Sustainability />
+                                )}
+                                {repoTab !== 'Overview' &&
+                                    repoTab !== 'Security' &&
+                                    repoTab !== 'Sustainability' && (
+                                        <div className="tab-placeholder">
+                                            <p>{repoTab} Dashboard</p>
+                                        </div>
                                 )}
                             </div>
                         </div>

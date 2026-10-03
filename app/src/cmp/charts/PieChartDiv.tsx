@@ -56,7 +56,7 @@ export default function PieChartDiv({ title, endpoint }: chartProps) {
     return (
         <div
             style={{
-                width: '75vw',
+                width: '100%',
                 margin: '0 auto',
                 textAlign: 'center',
                 border: '2px solid black',

@@ -8,6 +8,7 @@ export type chartProps = {
     stacked?: boolean;
     seriesKeys?: string[];
     seriesLabels?: string[];
+    maxRows?: number;
 };
 
 export type barDatum = {
