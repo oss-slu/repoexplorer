@@ -100,7 +100,7 @@ function App() {
                                         <div className="tab-placeholder">
                                             <p>{repoTab} Dashboard</p>
                                         </div>
-                                )}
+                                    )}
                             </div>
                         </div>
                     </div>

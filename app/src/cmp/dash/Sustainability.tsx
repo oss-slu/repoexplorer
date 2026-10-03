@@ -104,26 +104,32 @@ export default function Sustainability() {
                             </tr>
                         </thead>
                         <tbody>
-                            {(summary.communityFilesByStars ?? []).map((row) => (
-                                <tr key={row.name}>
-                                    <td>{row.name}</td>
-                                    {STAR_RANGES.map((range) => {
-                                        const value = Number(row[range] ?? 0);
+                            {(summary.communityFilesByStars ?? []).map(
+                                (row) => (
+                                    <tr key={row.name}>
+                                        <td>{row.name}</td>
+                                        {STAR_RANGES.map((range) => {
+                                            const value = Number(
+                                                row[range] ?? 0,
+                                            );
 
-                                        return (
-                                            <td
-                                                key={range}
-                                                style={{
-                                                    backgroundColor:
-                                                        getHeatmapColor(value),
-                                                }}
-                                            >
-                                                {value.toFixed(1)}%
-                                            </td>
-                                        );
-                                    })}
-                                </tr>
-                            ))}
+                                            return (
+                                                <td
+                                                    key={range}
+                                                    style={{
+                                                        backgroundColor:
+                                                            getHeatmapColor(
+                                                                value,
+                                                            ),
+                                                    }}
+                                                >
+                                                    {value.toFixed(1)}%
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                ),
+                            )}
                         </tbody>
                     </table>
                 </div>

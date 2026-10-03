@@ -65,8 +65,7 @@ export default function HeatmapTable({ title, endpoint }: chartProps) {
                                 <td>{row.name}</td>
                                 <td
                                     style={{
-                                        backgroundColor:
-                                            getHeatmapColor(value),
+                                        backgroundColor: getHeatmapColor(value),
                                     }}
                                 >
                                     {value.toFixed(1)}

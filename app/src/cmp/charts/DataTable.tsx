@@ -62,12 +62,13 @@ export default function DataTable({ title, endpoint, maxRows }: chartProps) {
             {data.length === 0 ? (
                 <p>No data available</p>
             ) : (
-                <table 
-                    style={{ 
-                        width: '100%', 
+                <table
+                    style={{
+                        width: '100%',
                         minWidth: 'max-content',
-                        borderCollapse: 'collapse' 
-                    }}>
+                        borderCollapse: 'collapse',
+                    }}
+                >
                     <thead>
                         <tr
                             style={{
@@ -90,21 +91,23 @@ export default function DataTable({ title, endpoint, maxRows }: chartProps) {
                         </tr>
                     </thead>
                     <tbody>
-                        {data.slice(0, maxRows ?? data.length).map((row, index) => (
-                            <tr
-                                key={index}
-                                style={{ borderBottom: '1px solid #eee' }}
-                            >
-                                {headers.map((header) => (
-                                    <td
-                                        key={header}
-                                        style={{ padding: '12px 8px' }}
-                                    >
-                                        {String(row[header] ?? '')}
-                                    </td>
-                                ))}
-                            </tr>
-                        ))}
+                        {data
+                            .slice(0, maxRows ?? data.length)
+                            .map((row, index) => (
+                                <tr
+                                    key={index}
+                                    style={{ borderBottom: '1px solid #eee' }}
+                                >
+                                    {headers.map((header) => (
+                                        <td
+                                            key={header}
+                                            style={{ padding: '12px 8px' }}
+                                        >
+                                            {String(row[header] ?? '')}
+                                        </td>
+                                    ))}
+                                </tr>
+                            ))}
                     </tbody>
                 </table>
             )}
