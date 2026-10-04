@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { API_URL, PIE_COLORS } from '../../consts';
 import type { barDatum, chartProps } from '../../types/charts';
-
+ 
 export default function BarChartDiv({
     title,
     endpoint,
