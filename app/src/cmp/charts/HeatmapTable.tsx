@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { API_URL } from '../../consts';
 import type { barDatum, chartProps } from '../../types/charts';
+import { formatLabel } from '../../utils/formatLabel';
 
 function getHeatmapColor(value: number) {
     const score = Math.max(0, Math.min(10, value));
@@ -62,7 +63,7 @@ export default function HeatmapTable({ title, endpoint }: chartProps) {
 
                         return (
                             <tr key={row.name}>
-                                <td>{row.name}</td>
+                                <td>{formatLabel(row.name)}</td>
                                 <td
                                     style={{
                                         backgroundColor: getHeatmapColor(value),

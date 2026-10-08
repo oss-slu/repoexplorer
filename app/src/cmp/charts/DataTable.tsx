@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { API_URL } from '../../consts';
 import type { chartProps } from '../../types/charts';
+import { formatLabel } from '../../utils/formatLabel';
 
 export default function DataTable({ title, endpoint, maxRows }: chartProps) {
     const [data, setData] = useState<Record<string, unknown>[]>([]);
@@ -85,7 +86,7 @@ export default function DataTable({ title, endpoint, maxRows }: chartProps) {
                                         ? 'University'
                                         : header === 'value'
                                           ? 'Count'
-                                          : header}
+                                          : formatLabel(header)}
                                 </th>
                             ))}
                         </tr>

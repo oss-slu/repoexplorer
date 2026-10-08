@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API_URL } from '../../consts';
+import { formatLabel } from '../../utils/formatLabel';
 import BarChartDiv from '../charts/BarChartDiv';
 import DataBlock from '../charts/DataBlock';
 import DataTable from '../charts/DataTable';
@@ -107,7 +108,7 @@ export default function Sustainability() {
                             {(summary.communityFilesByStars ?? []).map(
                                 (row) => (
                                     <tr key={row.name}>
-                                        <td>{row.name}</td>
+                                        <td>{formatLabel(row.name)}</td>
                                         {STAR_RANGES.map((range) => {
                                             const value = Number(
                                                 row[range] ?? 0,

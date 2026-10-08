@@ -30,7 +30,7 @@ describe('DataTable', () => {
         // headers
         // headers
         expect(await screen.findByText('University')).toBeInTheDocument();
-        expect(await screen.findByText('repositories')).toBeInTheDocument();
+        expect(await screen.findByText('Repositories')).toBeInTheDocument();
 
         // rows
         expect(

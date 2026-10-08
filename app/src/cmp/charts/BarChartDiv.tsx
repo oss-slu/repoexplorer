@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import { API_URL, PIE_COLORS } from '../../consts';
 import type { barDatum, chartProps } from '../../types/charts';
+import { formatLabel } from '../../utils/formatLabel';
 
 export default function BarChartDiv({
     title,
@@ -55,7 +56,7 @@ export default function BarChartDiv({
     const keys = stacked
         ? (seriesKeys ?? Object.keys(data[0] ?? {}).filter((k) => k !== 'name'))
         : ['value'];
-    const labels = seriesLabels ?? keys;
+    const labels = (seriesLabels ?? keys).map(formatLabel);
 
     return (
         <div
@@ -70,9 +71,11 @@ export default function BarChartDiv({
             <ResponsiveContainer width="100%" height={400}>
                 <BarChart data={data}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" />
+                    <XAxis dataKey="name" tickFormatter={formatLabel} />
                     <YAxis allowDecimals={false} />
-                    <Tooltip />
+                    <Tooltip
+                        labelFormatter={(label) => formatLabel(String(label))}
+                    />
                     {keys.length > 1 && <Legend />}
                     {keys.map((key, i) => (
                         <Bar

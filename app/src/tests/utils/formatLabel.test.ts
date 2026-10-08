@@ -20,4 +20,12 @@ describe('formatLabel helper', () => {
     it('returns an empty string when passed an empty string', () => {
         expect(formatLabel('')).toBe('');
     });
+
+    it('preserves acronyms when formatting labels', () => {
+        expect(formatLabel('DEV')).toBe('DEV');
+        expect(formatLabel('EDU')).toBe('EDU');
+        expect(formatLabel('totalDEVContributors')).toBe(
+            'Total DEV Contributors',
+        );
+    });
 });
