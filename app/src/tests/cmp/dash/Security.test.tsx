@@ -6,7 +6,7 @@ vi.mock('../../../cmp/charts/DataTable', () => ({
     default: ({ title }: { title?: string }) => <div>{title}</div>,
 }));
 
-vi.mock('../../../cmp/charts/BarChartDiv', () => ({
+vi.mock('../../../cmp/charts/HeatmapTable', () => ({
     default: ({ title }: { title?: string }) => <div>{title}</div>,
 }));
 
