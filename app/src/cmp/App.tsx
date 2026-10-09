@@ -91,11 +91,12 @@ function App() {
                             <div className="tab-view">
                                 {repoTab === 'Overview' && <Overview />}
                                 {repoTab === 'Impact' && <Impact />}
-                                {repoTab !== 'Overview' && repoTab !== 'Impact' && (
-                                    <div className="tab-placeholder">
-                                        <p>{repoTab} Dashboard</p>
-                                    </div>
-                                )}
+                                {repoTab !== 'Overview' &&
+                                    repoTab !== 'Impact' && (
+                                        <div className="tab-placeholder">
+                                            <p>{repoTab} Dashboard</p>
+                                        </div>
+                                    )}
                             </div>
                         </div>
                     </div>

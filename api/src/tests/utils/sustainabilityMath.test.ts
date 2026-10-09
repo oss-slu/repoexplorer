@@ -167,40 +167,35 @@ describe('Sustainability math helpers', () => {
         ]);
     });
 
-    it('places star values at every boundary and includes all project types', () => {
-        const rows = [0, 10, 11, 50, 51, 100, 101, 200, 201].map((stars, index) =>
-            makeRow({
-                id: index + 1,
-                stargazersCount: stars,
-                description: 'present',
-                typePredictionGpt5Mini: index % 2 === 0 ? 'DEV' : 'EDU',
-            }),
-        );
+    it('assigns each star boundary observation to exactly one bucket', () => {
+        const cases = [
+            { stars: 0, bucket: '0-10' },
+            { stars: 10, bucket: '0-10' },
+            { stars: 11, bucket: '11-50' },
+            { stars: 50, bucket: '11-50' },
+            { stars: 51, bucket: '51-100' },
+            { stars: 100, bucket: '51-100' },
+            { stars: 101, bucket: '101-200' },
+            { stars: 200, bucket: '101-200' },
+            { stars: 201, bucket: '>200' },
+        ] as const;
+        const buckets = ['0-10', '11-50', '51-100', '101-200', '>200'] as const;
 
-        const result = makeCommunityFilesByStarsArray(rows);
+        for (const [index, { stars, bucket }] of cases.entries()) {
+            const result = makeCommunityFilesByStarsArray([
+                makeRow({
+                    stargazersCount: stars,
+                    description: 'present',
+                    typePredictionGpt5Mini: index % 2 === 0 ? 'DEV' : 'EDU',
+                }),
+            ]);
+            const description = result.find((row) => row.name === 'description');
 
-        expect(result.map((row) => row.name)).toEqual([
-            'description',
-            'readme',
-            'license',
-            'codeOfConductFile',
-            'contributing',
-            'securityPolicy',
-            'issueTemplates',
-            'pullRequestTemplate',
-            'average',
-        ]);
-        for (const row of result) {
-            expect(Object.keys(row)).toEqual(['name', '0-10', '11-50', '51-100', '101-200', '>200']);
+            expect(description).toEqual({
+                name: 'description',
+                ...Object.fromEntries(buckets.map((name) => [name, name === bucket ? 100 : 0])),
+            });
         }
-        expect(result[0]).toEqual({
-            name: 'description',
-            '0-10': 100,
-            '11-50': 100,
-            '51-100': 100,
-            '101-200': 100,
-            '>200': 100,
-        });
     });
 
     it('uses bucket denominators, includes non-DEV rows, and averages rounded percentages', () => {

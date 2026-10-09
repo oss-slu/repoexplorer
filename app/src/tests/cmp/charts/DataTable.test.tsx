@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DataTable from '../../../cmp/charts/DataTable';
 
@@ -14,33 +14,43 @@ describe('DataTable', () => {
 
     it('fetches and displays tabular data', async () => {
         const mockData = [
-            { name: 'Saint Louis University', repositories: 275 },
-            { name: 'University of California, Santa Cruz', repositories: 150 },
+            { name: 'Saint Louis University', value: 275 },
+            { name: 'University of California, Santa Cruz', value: 150 },
         ];
 
         globalThis.fetch = vi.fn(() =>
             Promise.resolve({
                 ok: true,
-                json: () => Promise.resolve(mockData),
+                json: () => Promise.resolve({ reposPerUniversity: mockData }),
             } as Response),
         );
 
-        render(<DataTable title="Universities" endpoint="universities" />);
+        render(
+            <DataTable
+                title="Universities"
+                endpoint="overview/reposPerUniversity"
+            />,
+        );
 
-        // headers
-        // headers
-        expect(await screen.findByText('University')).toBeInTheDocument();
-        expect(await screen.findByText('repositories')).toBeInTheDocument();
+        expect(
+            await screen.findByRole('columnheader', { name: 'University' }),
+        ).toBeInTheDocument();
+        expect(
+            await screen.findByRole('columnheader', { name: 'Count' }),
+        ).toBeInTheDocument();
 
-        // rows
+        const sluRow = await screen.findByRole('row', {
+            name: 'Saint Louis University 275',
+        });
+        const ucscRow = await screen.findByRole('row', {
+            name: 'University of California, Santa Cruz 150',
+        });
         expect(
-            await screen.findByText('Saint Louis University'),
+            within(sluRow).getByRole('cell', { name: '275' }),
         ).toBeInTheDocument();
-        expect(await screen.findByText('275')).toBeInTheDocument();
         expect(
-            await screen.findByText('University of California, Santa Cruz'),
+            within(ucscRow).getByRole('cell', { name: '150' }),
         ).toBeInTheDocument();
-        expect(await screen.findByText('150')).toBeInTheDocument();
     });
 
     it('renders an error massage on fetch failure', async () => {

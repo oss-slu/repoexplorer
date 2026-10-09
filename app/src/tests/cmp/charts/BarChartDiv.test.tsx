@@ -85,8 +85,8 @@ describe('BarChartDiv', () => {
             ).toBeInTheDocument();
         });
 
-        expect(screen.getByText('DEV')).toBeInTheDocument();
-        expect(screen.getByText('EDU')).toBeInTheDocument();
+        expect(await screen.findByText('DEV')).toBeInTheDocument();
+        expect(await screen.findByText('EDU')).toBeInTheDocument();
     });
 
     it('shows an error message when the response is not ok', async () => {

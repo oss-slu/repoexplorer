@@ -21,7 +21,9 @@ export default function Impact() {
                 const resp = await fetch(`${API_URL}/impact`);
 
                 if (!resp.ok) {
-                    throw new Error(`Error fetching impact data: ${resp.status}`);
+                    throw new Error(
+                        `Error fetching impact data: ${resp.status}`,
+                    );
                 }
 
                 const json: impactSummary = await resp.json();
@@ -75,7 +77,14 @@ export default function Impact() {
                 </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', width: '100%' }}>
+            <div
+                style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: '24px',
+                    width: '100%',
+                }}
+            >
                 <BarChartDiv
                     title="Stars Distribution"
                     endpoint="impact/starsDistribution"

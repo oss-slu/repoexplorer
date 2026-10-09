@@ -12,7 +12,9 @@ vi.mock('../../../cmp/charts/BarChartDiv', () => ({
 
 vi.mock('../../../cmp/charts/DataBlock', () => ({
     default: ({ header, value }: { header?: string; value?: number }) => (
-        <div>{header}: {value}</div>
+        <div>
+            {header}: {value}
+        </div>
     ),
 }));
 
@@ -23,10 +25,14 @@ describe('Impact', () => {
 
     it('renders the loading state initially', () => {
         // Mock fetch to a pending promise so we can catch the loading state
-        vi.spyOn(globalThis, 'fetch').mockImplementationOnce(() => new Promise(() => {}));
-        
+        vi.spyOn(globalThis, 'fetch').mockImplementationOnce(
+            () => new Promise(() => {}),
+        );
+
         render(<Impact />);
-        expect(screen.getByText(/Loading impact dashboard.../i)).toBeInTheDocument();
+        expect(
+            screen.getByText(/Loading impact dashboard.../i),
+        ).toBeInTheDocument();
     });
 
     it('renders the impact dashboard on success', async () => {
@@ -44,7 +50,9 @@ describe('Impact', () => {
 
         // Wait for the fetch to resolve and the table title to appear
         await waitFor(() => {
-            expect(screen.getByText('Impact Indicators per University')).toBeInTheDocument();
+            expect(
+                screen.getByText('Impact Indicators per University'),
+            ).toBeInTheDocument();
         });
 
         // Verify DataBlocks rendered
@@ -56,8 +64,12 @@ describe('Impact', () => {
         // Verify BarChartDivs rendered
         expect(screen.getByText('Stars Distribution')).toBeInTheDocument();
         expect(screen.getByText('Forks Distribution')).toBeInTheDocument();
-        expect(screen.getByText('Release Downloads Distribution')).toBeInTheDocument();
-        expect(screen.getByText('Contributors Distribution')).toBeInTheDocument();
+        expect(
+            screen.getByText('Release Downloads Distribution'),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText('Contributors Distribution'),
+        ).toBeInTheDocument();
     });
 
     it('shows an error message when the impact request fails', async () => {

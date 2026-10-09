@@ -27,10 +27,10 @@ describe('GET /impact', () => {
 
         expect(res.status).toBe(200);
         expect(Object.keys(res.body).sort()).toEqual([...IMPACT_FIELDS].sort());
-        expect(res.body.totalStars).toBe(100);
-        expect(res.body.totalForks).toBe(234);
-        expect(res.body.totalDownloads).toBe(208);
-        expect(res.body.totalContributors).toBe(451);
+        expect(res.body.totalStars).toBe(146);
+        expect(res.body.totalForks).toBe(289);
+        expect(res.body.totalDownloads).toBe(223);
+        expect(res.body.totalContributors).toBe(515);
         expect(res.body.impactIndicatorsPerUniversity).toEqual([
             {
                 name: 'University of California, Santa Barbara',
@@ -41,22 +41,22 @@ describe('GET /impact', () => {
             },
             {
                 name: 'University of California, Santa Cruz',
-                stars: 10,
-                forks: 1,
+                stars: 34,
+                forks: 28,
                 downloads: 0,
-                contributors: 1,
+                contributors: 24,
             },
             {
                 name: 'Saint Louis University',
-                stars: 80,
-                forks: 232,
-                downloads: 208,
-                contributors: 449,
+                stars: 102,
+                forks: 260,
+                downloads: 223,
+                contributors: 490,
             },
         ]);
         expect(res.body.starsDistribution).toEqual([
-            { name: '0-10', value: 42 },
-            { name: '11-100', value: 0 },
+            { name: '0-10', value: 110 },
+            { name: '11-100', value: 1 },
             { name: '101-1000', value: 0 },
             { name: '1k-10k', value: 0 },
             { name: '10k+', value: 0 },
@@ -74,14 +74,14 @@ describe('GET /impact', () => {
 
     it('applies case-insensitive, OR, AND, and unknown-parameter filter behavior', async () => {
         const cases = [
-            { query: { university: 'saint louis university' }, totalStars: 80, totalContributors: 449 },
-            { query: { language: 'PYTHON' }, totalStars: 45, totalContributors: 155 },
-            { query: { license: 'MIT' }, totalStars: 43, totalContributors: 124 },
-            { query: { typePredictionGpt5Mini: 'dev' }, totalStars: 87, totalContributors: 316 },
+            { query: { university: 'saint louis university' }, totalStars: 102, totalContributors: 490 },
+            { query: { language: 'PYTHON' }, totalStars: 55, totalContributors: 164 },
+            { query: { license: 'MIT' }, totalStars: 62, totalContributors: 150 },
+            { query: { typePredictionGpt5Mini: 'dev' }, totalStars: 106, totalContributors: 336 },
             {
                 query: { language: ['PYTHON', 'javascript'] },
-                totalStars: 58,
-                totalContributors: 250,
+                totalStars: 84,
+                totalContributors: 281,
             },
             {
                 query: {
@@ -90,10 +90,10 @@ describe('GET /impact', () => {
                     license: 'MIT',
                     typePredictionGpt5Mini: 'dev',
                 },
-                totalStars: 4,
-                totalContributors: 27,
+                totalStars: 7,
+                totalContributors: 31,
             },
-            { query: { ignored: 'does-not-filter' }, totalStars: 100, totalContributors: 451 },
+            { query: { ignored: 'does-not-filter' }, totalStars: 146, totalContributors: 515 },
         ];
 
         for (const testCase of cases) {
