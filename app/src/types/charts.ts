@@ -6,6 +6,7 @@ export type chartProps = {
     title?: string;
     endpoint?: string;
     stacked?: boolean;
+    horizontal?: boolean;
     seriesKeys?: string[];
     seriesLabels?: string[];
     maxRows?: number;

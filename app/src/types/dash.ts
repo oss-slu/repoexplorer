@@ -4,3 +4,10 @@ export type overviewSummary = {
     totalContributors?: number;
     avgBusFactor?: number;
 };
+
+export type organizationSummary = {
+    totalOrganizations?: number;
+    percentOrganizationsURL?: number;
+    percentOrganizationsDescription?: number;
+    percentOrganizationsEmail?: number;
+};
