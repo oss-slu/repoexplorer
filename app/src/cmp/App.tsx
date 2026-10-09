@@ -2,6 +2,7 @@ import { useState } from 'react';
 import NavBar from './NavBar';
 import Overview from './dash/Overview';
 import Organization from './dash/Organization';
+import Impact from './dash/Impact';
 import aboutText from '../../../docs/about.md?raw';
 import Markdown from 'react-markdown';
 import SidebarFilters from './SidebarFilters';
@@ -89,7 +90,8 @@ function App() {
 
                             <div className="tab-view">
                                 {repoTab === 'Overview' && <Overview />}
-                                {repoTab !== 'Overview' && (
+                                {repoTab === 'Impact' && <Impact />}
+                                {repoTab !== 'Overview' && repoTab !== 'Impact' && (
                                     <div className="tab-placeholder">
                                         <p>{repoTab} Dashboard</p>
                                     </div>
