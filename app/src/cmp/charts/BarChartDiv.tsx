@@ -57,13 +57,17 @@ export default function BarChartDiv({
         : ['value'];
     const labels = seriesLabels ?? keys;
 
-    return (
+return (
         <div
             style={{
-                width: '75vw',
+                width: '100%',
                 margin: '0 auto',
                 textAlign: 'center',
-                border: '2px solid black',
+                background: '#ffffff',
+                border: '1px solid #dee2e6',
+                borderRadius: '8px',
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+                paddingTop: '16px',
             }}
         >
             <h2>{title}</h2>
