@@ -22,20 +22,20 @@ describe('GET /overview', () => {
 
         expect(res.status).toBe(200);
         expect(Object.keys(res.body).sort()).toEqual([...OVERVIEW_FIELDS].sort());
-        expect(res.body.totalRepos).toBe(42);
-        expect(res.body.withLicense).toBe(24);
-        expect(res.body.percentWithLicense).toBeCloseTo(57.14285714285714);
-        expect(res.body.totalContributors).toBe(451);
-        expect(res.body.avgBusFactor).toBeCloseTo(2.8333333333333335);
+        expect(res.body.totalRepos).toBe(111);
+        expect(res.body.withLicense).toBe(83);
+        expect(res.body.percentWithLicense).toBeCloseTo((83 / 111) * 100);
+        expect(res.body.totalContributors).toBe(515);
+        expect(res.body.avgBusFactor).toBeCloseTo(139 / 111);
         expect(res.body.reposPerUniversity).toEqual([
             { name: 'University of California, Santa Barbara', value: 1 },
-            { name: 'University of California, Santa Cruz', value: 1 },
-            { name: 'Saint Louis University', value: 40 },
+            { name: 'University of California, Santa Cruz', value: 3 },
+            { name: 'Saint Louis University', value: 107 },
         ]);
-        expect(res.body.languageDistribution).toContainEqual({ name: 'Python', value: 15 / 42 });
-        expect(res.body.licenseDistribution).toContainEqual({ name: 'mit', value: 11 / 42 });
-        expect(res.body.typeDistribution).toContainEqual({ name: 'DEV', value: 31 / 42 });
-        expect(res.body.communityFilesPresence).toContainEqual({ name: 'license', value: (24 / 42) * 100 });
+        expect(res.body.languageDistribution).toContainEqual({ name: 'Python', value: 18 / 111 });
+        expect(res.body.licenseDistribution).toContainEqual({ name: 'mit', value: 26 / 111 });
+        expect(res.body.typeDistribution).toContainEqual({ name: 'DEV', value: 43 / 111 });
+        expect(res.body.communityFilesPresence).toContainEqual({ name: 'license', value: (83 / 111) * 100 });
     });
 
     it.each(OVERVIEW_FIELDS)('returns the full-response value from /overview/%s', async (field) => {
@@ -51,16 +51,16 @@ describe('GET /overview', () => {
         const cases = [
             {
                 query: { university: 'saint louis university' },
-                totalRepos: 40,
-                totalContributors: 449,
+                totalRepos: 107,
+                totalContributors: 490,
             },
-            { query: { language: 'PYTHON' }, totalRepos: 15, totalContributors: 155 },
-            { query: { license: 'MIT' }, totalRepos: 11, totalContributors: 124 },
-            { query: { typePredictionGpt5Mini: 'dev' }, totalRepos: 31, totalContributors: 316 },
+            { query: { language: 'PYTHON' }, totalRepos: 18, totalContributors: 164 },
+            { query: { license: 'MIT' }, totalRepos: 26, totalContributors: 150 },
+            { query: { typePredictionGpt5Mini: 'dev' }, totalRepos: 43, totalContributors: 336 },
             {
                 query: { language: ['PYTHON', 'javascript'] },
-                totalRepos: 21,
-                totalContributors: 250,
+                totalRepos: 27,
+                totalContributors: 281,
             },
             {
                 query: {
@@ -69,10 +69,10 @@ describe('GET /overview', () => {
                     license: 'MIT',
                     typePredictionGpt5Mini: 'dev',
                 },
-                totalRepos: 1,
-                totalContributors: 27,
+                totalRepos: 2,
+                totalContributors: 31,
             },
-            { query: { ignored: 'does-not-filter' }, totalRepos: 42, totalContributors: 451 },
+            { query: { ignored: 'does-not-filter' }, totalRepos: 111, totalContributors: 515 },
         ];
 
         for (const testCase of cases) {

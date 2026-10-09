@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { API_URL, PIE_COLORS } from '../../consts';
 import type { barDatum, chartProps } from '../../types/charts';
- 
+
 export default function BarChartDiv({
     title,
     endpoint,
@@ -58,7 +58,7 @@ export default function BarChartDiv({
         : ['value'];
     const labels = seriesLabels ?? keys;
 
-return (
+    return (
         <div
             style={{
                 width: '100%',
@@ -73,16 +73,15 @@ return (
         >
             <h2>{title}</h2>
             <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={data} layout={horizontal ? 'vertical' : 'horizontal'}>
+                <BarChart
+                    data={data}
+                    layout={horizontal ? 'vertical' : 'horizontal'}
+                >
                     <CartesianGrid strokeDasharray="3 3" />
-                    {horizontal? (
+                    {horizontal ? (
                         <>
                             <XAxis type="number" allowDecimals={false} />
-                            <YAxis
-                                dataKey="name"
-                                type="category"
-                                width={120}
-                            />
+                            <YAxis dataKey="name" type="category" width={120} />
                         </>
                     ) : (
                         <>

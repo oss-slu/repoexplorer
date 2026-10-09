@@ -17,8 +17,8 @@ describe('GET /sustainability', () => {
 
         expect(res.status).toBe(200);
         expect(Object.keys(res.body).sort()).toEqual([...SUSTAINABILITY_FIELDS].sort());
-        expect(res.body.avgContributors).toBeCloseTo(10.738095238095237);
-        expect(res.body.avgBusFactor).toBeCloseTo(2.8333333333333335);
+        expect(res.body.avgContributors).toBeCloseTo(515 / 111);
+        expect(res.body.avgBusFactor).toBeCloseTo(139 / 56);
         expect(res.body.sustainabilityIndicatorsPerUniversity[0]).toEqual(
             expect.objectContaining({
                 name: expect.any(String),
@@ -74,13 +74,13 @@ describe('GET /sustainability', () => {
     it('applies each filter case-insensitively and combines filters with AND/OR semantics', async () => {
         const app = createApp();
         const cases = [
-            { query: { university: 'saint louis university' }, expected: 11.225 },
-            { query: { language: 'python' }, expected: 10.333333333333334 },
-            { query: { license: 'MIT' }, expected: 11.272727272727273 },
-            { query: { typePredictionGpt5Mini: 'dev' }, expected: 10.193548387096774 },
+            { query: { university: 'saint louis university' }, expected: 490 / 107 },
+            { query: { language: 'python' }, expected: 164 / 18 },
+            { query: { license: 'MIT' }, expected: 150 / 26 },
+            { query: { typePredictionGpt5Mini: 'dev' }, expected: 336 / 43 },
             {
                 query: { language: ['python', 'javascript'] },
-                expected: 11.904761904761905,
+                expected: 281 / 27,
             },
             {
                 query: {
@@ -89,7 +89,7 @@ describe('GET /sustainability', () => {
                     license: 'MIT',
                     typePredictionGpt5Mini: 'dev',
                 },
-                expected: 27,
+                expected: 31 / 2,
             },
         ];
 

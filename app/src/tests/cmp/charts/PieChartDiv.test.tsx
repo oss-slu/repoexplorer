@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import PieChartDiv from '../../../cmp/charts/PieChartDiv';
 
 describe('PieChartDiv', () => {
@@ -28,10 +28,12 @@ describe('PieChartDiv', () => {
                 Promise.resolve({
                     ok: true,
                     json: () =>
-                        Promise.resolve([
-                            { name: 'TypeScript', value: 0.6 },
-                            { name: 'Python', value: 0.4 },
-                        ]),
+                        Promise.resolve({
+                            languageDistribution: [
+                                { name: 'TypeScript', value: 0.6 },
+                                { name: 'Python', value: 0.4 },
+                            ],
+                        }),
                 }),
             ) as unknown as typeof fetch,
         );
@@ -47,8 +49,9 @@ describe('PieChartDiv', () => {
             expect(screen.getByText('Languages')).toBeInTheDocument();
         });
 
-        expect(await screen.findByText('TypeScript')).toBeInTheDocument();
-        expect(await screen.findByText('Python')).toBeInTheDocument();
+        const legend = await screen.findByRole('list');
+        expect(within(legend).getByText('TypeScript')).toBeInTheDocument();
+        expect(within(legend).getByText('Python')).toBeInTheDocument();
     });
 
     it('shows an error message when the response is not ok', async () => {

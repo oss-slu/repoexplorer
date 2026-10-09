@@ -14,7 +14,9 @@ export default function Organization() {
                 const resp = await fetch(`${API_URL}/organization`);
 
                 if (!resp.ok) {
-                    throw new Error(`Error fetching organization: ${resp.status}`);
+                    throw new Error(
+                        `Error fetching organization: ${resp.status}`,
+                    );
                 }
 
                 const json: organizationSummary = await resp.json();
@@ -41,7 +43,6 @@ export default function Organization() {
     return (
         <div className="overview-dashboard">
             <div className="overview-top-row">
-
                 <div className="overview-summary-grid">
                     <DataBlock
                         header="Total Organizations"
@@ -62,9 +63,20 @@ export default function Organization() {
                 </div>
             </div>
 
-            <BarChartDiv title="Organizations Per University" endpoint="organization/orgsPerUniversity" horizontal/> 
-            <BarChartDiv title="Organizations Created Per Year" endpoint="organization/orgsCreatedPerYear" />
-            <BarChartDiv title="Profile Completeness" endpoint="organization/profileCompleteness" horizontal/> 
+            <BarChartDiv
+                title="Organizations Per University"
+                endpoint="organization/orgsPerUniversity"
+                horizontal
+            />
+            <BarChartDiv
+                title="Organizations Created Per Year"
+                endpoint="organization/orgsCreatedPerYear"
+            />
+            <BarChartDiv
+                title="Profile Completeness"
+                endpoint="organization/profileCompleteness"
+                horizontal
+            />
         </div>
     );
 }

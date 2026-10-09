@@ -10,9 +10,11 @@ import {
     makeNumericDistributionArray,
     makeImpactIndicatorsArray,
     makeAvgScorePerMetricArray,
+    makeDateDistributionArray,
+    makeProfileCompleteDistributionArray,
 } from '../../utils/math';
 
-import type { repoData, secrData } from '../../types/appData';
+import type { orgsData, repoData, secrData } from '../../types/appData';
 
 const makeRepo = (overrides: Partial<repoData> = {}): repoData => ({
     university: 'SLU',
@@ -72,6 +74,21 @@ const makeSecurity = (overrides: Partial<secrData> = {}): secrData => ({
     tokenPermissions: 1,
     vulnerabilities: 1,
     totalScore: 11,
+    ...overrides,
+});
+
+const makeOrganization = (overrides: Partial<orgsData> = {}): orgsData => ({
+    login: 'organization',
+    name: 'Organization',
+    description: 'Organization description',
+    location: 'St. Louis',
+    company: 'Example University',
+    email: 'contact@example.edu',
+    url: 'https://example.edu',
+    createdAt: '2020-06-15T12:00:00',
+    updatedAt: '2026-06-15T12:00:00',
+    university: 'SLU',
+    affiliationPredictionOrgs: null,
     ...overrides,
 });
 
@@ -352,6 +369,63 @@ describe('math utilities', () => {
 
         it('returns an empty array for empty rows', () => {
             expect(makeAvgScorePerMetricArray([])).toEqual([]);
+        });
+    });
+
+    describe('organization calculations', () => {
+        it('counts valid organization creation dates by year', () => {
+            const rows = [
+                makeOrganization({ createdAt: '2020-06-15T12:00:00' }),
+                makeOrganization({ login: 'second', createdAt: '2020-09-01T12:00:00' }),
+                makeOrganization({ login: 'third', createdAt: '2023-03-10T12:00:00' }),
+                makeOrganization({ login: 'missing', createdAt: null as unknown as string }),
+                makeOrganization({ login: 'invalid', createdAt: 'not-a-date' }),
+            ];
+
+            const result = makeDateDistributionArray(rows, 'createdAt');
+
+            expect(result.find((row) => row.name === '2020')).toEqual({ name: '2020', value: 2 });
+            expect(result.find((row) => row.name === '2022')).toEqual({ name: '2022', value: 0 });
+            expect(result.find((row) => row.name === '2023')).toEqual({ name: '2023', value: 1 });
+            expect(result.reduce((sum, row) => sum + row.value, 0)).toBe(3);
+        });
+
+        it('calculates profile completeness for each organization field', () => {
+            const rows = [
+                makeOrganization({
+                    url: 'https://one.example.edu',
+                    location: 'St. Louis',
+                    description: 'First organization',
+                    email: null,
+                    company: 'First University',
+                }),
+                makeOrganization({
+                    login: 'second',
+                    url: 'https://two.example.edu',
+                    location: '',
+                    description: 'Second organization',
+                    email: '',
+                    company: null,
+                }),
+                makeOrganization({
+                    login: 'third',
+                    url: '',
+                    location: null,
+                    description: 'Third organization',
+                    email: null,
+                    company: '',
+                }),
+            ];
+
+            const result = makeProfileCompleteDistributionArray(rows);
+
+            expect(result).toHaveLength(5);
+            expect(result.map((row) => row.name)).toEqual(['url', 'location', 'description', 'email', 'company']);
+            expect(result.find((row) => row.name === 'url')?.value).toBeCloseTo((2 / 3) * 100);
+            expect(result.find((row) => row.name === 'location')?.value).toBeCloseTo((1 / 3) * 100);
+            expect(result.find((row) => row.name === 'description')?.value).toBe(100);
+            expect(result.find((row) => row.name === 'email')?.value).toBe(0);
+            expect(result.find((row) => row.name === 'company')?.value).toBeCloseTo((1 / 3) * 100);
         });
     });
 });
