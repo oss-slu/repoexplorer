@@ -17,6 +17,7 @@ export default function BarChartDiv({
     title,
     endpoint,
     stacked = false,
+    horizontal = false,
     seriesKeys,
     seriesLabels,
 }: chartProps) {
@@ -69,10 +70,24 @@ export default function BarChartDiv({
         >
             <h2>{title}</h2>
             <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={data}>
+                <BarChart data={data} layout={horizontal ? 'vertical' : 'horizontal'}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" tickFormatter={formatLabel} />
-                    <YAxis allowDecimals={false} />
+
+                    {horizontal? (
+                        <>
+                            <XAxis type="number" allowDecimals={false} />
+                            <YAxis
+                                dataKey="name"
+                                type="category"
+                                width={120}
+                            />
+                        </>
+                    ) : (
+                        <>
+                            <XAxis dataKey="name" tickFormatter={formatLabel} />
+                            <YAxis allowDecimals={false} />
+                        </>
+                    )}
                     <Tooltip
                         labelFormatter={(label) => formatLabel(String(label))}
                     />
