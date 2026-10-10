@@ -1,26 +1,30 @@
 import { render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import Security from '../../../cmp/dash/Security';
 
 vi.mock('../../../cmp/charts/DataTable', () => ({
-    default: ({ title }: { title?: string }) => <div>{title}</div>,
+    default: ({ title, endpoint, maxRows }: { title?: string; endpoint?: string; maxRows?: number; 
+    }) => (<div
+            data-testid="scorecard-table"
+            data-endpoint={endpoint}
+            data-max-rows={maxRows}
+        >
+            {title}
+        </div>),
 }));
 
 vi.mock('../../../cmp/charts/HeatmapTable', () => ({
-    default: ({ title }: { title?: string }) => <div>{title}</div>,
+    default: ({ title, endpoint }: { title?: string; endpoint?: string;
+    }) => (<div
+            data-testid="security-heatmap"
+            data-endpoint={endpoint}
+        >
+            {title}
+        </div>),
 }));
 
 describe('Security', () => {
-    afterEach(() => {
-        vi.restoreAllMocks();
-    });
-
     it('renders the security dashboard', async () => {
-        vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-            ok: true,
-            json: async () => ({}),
-        } as Response);
-
         render(<Security />);
 
         expect(
@@ -32,18 +36,21 @@ describe('Security', () => {
         ).toBeInTheDocument();
     });
 
-    it('shows an error message when the security request fails', async () => {
-        vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-            ok: false,
-            status: 500,
-        } as Response);
+});
 
-        render(<Security />);
+it('passes the correct configuration to each chart', () => {
+    render(<Security />);
 
-        expect(
-            await screen.findByText(
-                'Failed to load security: Error fetching security: 500',
-            ),
-        ).toBeInTheDocument();
-    });
+    expect(
+        screen.getByTestId('scorecard-table'),
+    ).toHaveAttribute('data-endpoint', 'security/securityScorecardByRepo');
+
+    expect(
+        screen.getByTestId('scorecard-table'),
+    ).toHaveAttribute('data-max-rows', '10');
+
+    expect(
+        screen.getByTestId('security-heatmap'),
+    ).toHaveAttribute('data-endpoint', 'security/avgScorePerMetric');
+
 });

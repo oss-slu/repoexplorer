@@ -19,8 +19,8 @@ describe('Sustainability', () => {
         vi.spyOn(globalThis, 'fetch').mockResolvedValue({
             ok: true,
             json: async () => ({
-                avgBusFactor: 2.482142857142857,
-                avgContributors: 4.63963963963964
+                avgBusFactor: 2.5,
+                avgContributors: 4.6
             }),
         } as Response);
 
@@ -30,10 +30,10 @@ describe('Sustainability', () => {
             expect(screen.getByText('Average bus factor')).toBeInTheDocument();
         });
 
-        expect(screen.getByText('2.482142857142857')).toBeInTheDocument();
+        expect(screen.getByText('2.5')).toBeInTheDocument();
 
         expect(screen.getByText('Average # contributors')).toBeInTheDocument();
-        expect(screen.getByText('4.63963963963964')).toBeInTheDocument();
+        expect(screen.getByText('4.6')).toBeInTheDocument();
 
         expect(
             screen.getByText('Sustainability Indicators per University'),
