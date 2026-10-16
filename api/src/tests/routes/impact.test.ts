@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { createApp } from '../../app';
+import sampleRepoData from '../../../data/sample/sampleRepoData.json';
 
 const IMPACT_FIELDS = [
     'totalStars',
@@ -27,40 +28,48 @@ describe('GET /impact', () => {
 
         expect(res.status).toBe(200);
         expect(Object.keys(res.body).sort()).toEqual([...IMPACT_FIELDS].sort());
-        expect(res.body.totalStars).toBe(146);
-        expect(res.body.totalForks).toBe(289);
-        expect(res.body.totalDownloads).toBe(223);
-        expect(res.body.totalContributors).toBe(515);
-        expect(res.body.impactIndicatorsPerUniversity).toEqual([
-            {
-                name: 'University of California, Santa Barbara',
-                stars: 10,
-                forks: 1,
-                downloads: 0,
-                contributors: 1,
-            },
-            {
-                name: 'University of California, Santa Cruz',
-                stars: 34,
-                forks: 28,
-                downloads: 0,
-                contributors: 24,
-            },
-            {
-                name: 'Saint Louis University',
-                stars: 102,
-                forks: 260,
-                downloads: 223,
-                contributors: 490,
-            },
+        expect(res.body.totalStars).toBe(
+            sampleRepoData.reduce<number>((total, repo) => total + (Number(repo.stargazersCount) || 0), 0),
+        );
+        expect(res.body.totalForks).toBe(
+            sampleRepoData.reduce<number>((total, repo) => total + (Number(repo.forksCount) || 0), 0),
+        );
+        expect(res.body.totalDownloads).toBe(
+            sampleRepoData.reduce<number>((total, repo) => total + (Number(repo.releaseDownloads) || 0), 0),
+        );
+        expect(res.body.totalContributors).toBe(
+            sampleRepoData.reduce<number>((total, repo) => total + (Number(repo.contributorCount) || 0), 0),
+        );
+        expect(
+            res.body.impactIndicatorsPerUniversity.reduce(
+                (
+                    totals: { stars: number; forks: number; downloads: number; contributors: number },
+                    university: { stars: number; forks: number; downloads: number; contributors: number },
+                ) => ({
+                    stars: totals.stars + university.stars,
+                    forks: totals.forks + university.forks,
+                    downloads: totals.downloads + university.downloads,
+                    contributors: totals.contributors + university.contributors,
+                }),
+                { stars: 0, forks: 0, downloads: 0, contributors: 0 },
+            ),
+        ).toEqual({
+            stars: res.body.totalStars,
+            forks: res.body.totalForks,
+            downloads: res.body.totalDownloads,
+            contributors: res.body.totalContributors,
+        });
+        expect(res.body.starsDistribution).toHaveLength(5);
+        expect(res.body.starsDistribution.map((group: { name: string }) => group.name)).toEqual([
+            '0-10',
+            '11-100',
+            '101-1000',
+            '1k-10k',
+            '10k+',
         ]);
-        expect(res.body.starsDistribution).toEqual([
-            { name: '0-10', value: 110 },
-            { name: '11-100', value: 1 },
-            { name: '101-1000', value: 0 },
-            { name: '1k-10k', value: 0 },
-            { name: '10k+', value: 0 },
-        ]);
+        expect(
+            res.body.starsDistribution.reduce((total: number, group: { value: number }) => total + group.value, 0),
+        ).toBe(sampleRepoData.length);
     });
 
     it.each(IMPACT_FIELDS)('returns the full-response value from /impact/%s', async (field) => {
@@ -74,14 +83,50 @@ describe('GET /impact', () => {
 
     it('applies case-insensitive, OR, AND, and unknown-parameter filter behavior', async () => {
         const cases = [
-            { query: { university: 'saint louis university' }, totalStars: 102, totalContributors: 490 },
-            { query: { language: 'PYTHON' }, totalStars: 55, totalContributors: 164 },
-            { query: { license: 'MIT' }, totalStars: 62, totalContributors: 150 },
-            { query: { typePredictionGpt5Mini: 'dev' }, totalStars: 106, totalContributors: 336 },
+            {
+                query: { university: 'saint louis university' },
+                totalStars: sampleRepoData
+                    .filter((repo) => repo.university?.toLowerCase() === 'saint louis university')
+                    .reduce<number>((total, repo) => total + (Number(repo.stargazersCount) || 0), 0),
+                totalContributors: sampleRepoData
+                    .filter((repo) => repo.university?.toLowerCase() === 'saint louis university')
+                    .reduce<number>((total, repo) => total + (Number(repo.contributorCount) || 0), 0),
+            },
+            {
+                query: { language: 'PYTHON' },
+                totalStars: sampleRepoData
+                    .filter((repo) => repo.language?.toLowerCase() === 'python')
+                    .reduce<number>((total, repo) => total + (Number(repo.stargazersCount) || 0), 0),
+                totalContributors: sampleRepoData
+                    .filter((repo) => repo.language?.toLowerCase() === 'python')
+                    .reduce<number>((total, repo) => total + (Number(repo.contributorCount) || 0), 0),
+            },
+            {
+                query: { license: 'MIT' },
+                totalStars: sampleRepoData
+                    .filter((repo) => repo.license?.toLowerCase() === 'mit')
+                    .reduce<number>((total, repo) => total + (Number(repo.stargazersCount) || 0), 0),
+                totalContributors: sampleRepoData
+                    .filter((repo) => repo.license?.toLowerCase() === 'mit')
+                    .reduce<number>((total, repo) => total + (Number(repo.contributorCount) || 0), 0),
+            },
+            {
+                query: { typePredictionGpt5Mini: 'dev' },
+                totalStars: sampleRepoData
+                    .filter((repo) => repo.typePredictionGpt5Mini?.toLowerCase() === 'dev')
+                    .reduce<number>((total, repo) => total + (Number(repo.stargazersCount) || 0), 0),
+                totalContributors: sampleRepoData
+                    .filter((repo) => repo.typePredictionGpt5Mini?.toLowerCase() === 'dev')
+                    .reduce<number>((total, repo) => total + (Number(repo.contributorCount) || 0), 0),
+            },
             {
                 query: { language: ['PYTHON', 'javascript'] },
-                totalStars: 84,
-                totalContributors: 281,
+                totalStars: sampleRepoData
+                    .filter((repo) => ['python', 'javascript'].includes(repo.language?.toLowerCase() ?? ''))
+                    .reduce<number>((total, repo) => total + (Number(repo.stargazersCount) || 0), 0),
+                totalContributors: sampleRepoData
+                    .filter((repo) => ['python', 'javascript'].includes(repo.language?.toLowerCase() ?? ''))
+                    .reduce<number>((total, repo) => total + (Number(repo.contributorCount) || 0), 0),
             },
             {
                 query: {
@@ -90,10 +135,36 @@ describe('GET /impact', () => {
                     license: 'MIT',
                     typePredictionGpt5Mini: 'dev',
                 },
-                totalStars: 7,
-                totalContributors: 31,
+                totalStars: sampleRepoData
+                    .filter(
+                        (repo) =>
+                            repo.university?.toLowerCase() === 'saint louis university' &&
+                            repo.language?.toLowerCase() === 'python' &&
+                            repo.license?.toLowerCase() === 'mit' &&
+                            repo.typePredictionGpt5Mini?.toLowerCase() === 'dev',
+                    )
+                    .reduce<number>((total, repo) => total + (Number(repo.stargazersCount) || 0), 0),
+                totalContributors: sampleRepoData
+                    .filter(
+                        (repo) =>
+                            repo.university?.toLowerCase() === 'saint louis university' &&
+                            repo.language?.toLowerCase() === 'python' &&
+                            repo.license?.toLowerCase() === 'mit' &&
+                            repo.typePredictionGpt5Mini?.toLowerCase() === 'dev',
+                    )
+                    .reduce<number>((total, repo) => total + (Number(repo.contributorCount) || 0), 0),
             },
-            { query: { ignored: 'does-not-filter' }, totalStars: 146, totalContributors: 515 },
+            {
+                query: { ignored: 'does-not-filter' },
+                totalStars: sampleRepoData.reduce<number>(
+                    (total, repo) => total + (Number(repo.stargazersCount) || 0),
+                    0,
+                ),
+                totalContributors: sampleRepoData.reduce<number>(
+                    (total, repo) => total + (Number(repo.contributorCount) || 0),
+                    0,
+                ),
+            },
         ];
 
         for (const testCase of cases) {

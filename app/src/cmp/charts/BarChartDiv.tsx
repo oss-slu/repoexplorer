@@ -20,31 +20,69 @@ export default function BarChartDiv({
     horizontal = false,
     seriesKeys,
     seriesLabels,
-}: chartProps) {
+    filters = {},
+}: chartProps & {
+    filters?: Record<string, string | number>;
+}) {
     const [data, setData] = useState<barDatum[] | null>(null);
     const [error, setError] = useState<string | null>(null);
+
+    const queryString = new URLSearchParams(
+        Object.entries(filters)
+            .filter(
+                ([, value]) => value !== 'All' && value !== '' && value !== 0,
+            )
+            .map(([key, value]) => [key, String(value)]),
+    ).toString();
 
     useEffect(() => {
         if (!endpoint) return;
 
-        (async () => {
+        const controller = new AbortController();
+
+        const fetchData = async () => {
             try {
-                const res = await fetch(`${API_URL}/${endpoint}`);
+                setError(null);
+                setData(null);
+
+                const url = `${API_URL}/${endpoint}${
+                    queryString ? `?${queryString}` : ''
+                }`;
+
+                const res = await fetch(url, {
+                    signal: controller.signal,
+                });
 
                 if (!res.ok) {
                     throw new Error(`Failed to fetch data from ${endpoint}`);
                 }
 
                 const json = await res.json();
-                const arr: barDatum[] = Object.values(json)[0] as barDatum[];
+
+                if (controller.signal.aborted) {
+                    return;
+                }
+
+                const arr: barDatum[] = Array.isArray(json)
+                    ? json
+                    : (Object.values(json)[0] as barDatum[]);
+
                 setData(arr);
             } catch (err) {
+                if (controller.signal.aborted) {
+                    return;
+                }
+
                 setError(
                     err instanceof Error ? err.message : 'Failed to load data',
                 );
             }
-        })();
-    }, [endpoint]);
+        };
+
+        void fetchData();
+
+        return () => controller.abort();
+    }, [endpoint, queryString]);
 
     if (error)
         return (
@@ -52,6 +90,7 @@ export default function BarChartDiv({
                 Failed to load {title}: {error}
             </div>
         );
+
     if (!data) return <div>Loading {title}...</div>;
 
     const keys = stacked

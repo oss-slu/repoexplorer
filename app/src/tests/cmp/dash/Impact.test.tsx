@@ -29,7 +29,7 @@ describe('Impact', () => {
             () => new Promise(() => {}),
         );
 
-        render(<Impact />);
+        render(<Impact filters={{}} />);
         expect(
             screen.getByText(/Loading impact dashboard.../i),
         ).toBeInTheDocument();
@@ -46,7 +46,7 @@ describe('Impact', () => {
             }),
         } as Response);
 
-        render(<Impact />);
+        render(<Impact filters={{}} />);
 
         // Wait for the fetch to resolve and the table title to appear
         await waitFor(() => {
@@ -78,7 +78,7 @@ describe('Impact', () => {
             status: 500,
         } as Response);
 
-        render(<Impact />);
+        render(<Impact filters={{}} />);
 
         expect(
             await screen.findByText(

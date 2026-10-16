@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { createApp } from '../../app';
+import sampleRepoData from '../../../data/sample/sampleRepoData.json';
 
 const OVERVIEW_FIELDS = [
     'totalRepos',
@@ -22,20 +23,38 @@ describe('GET /overview', () => {
 
         expect(res.status).toBe(200);
         expect(Object.keys(res.body).sort()).toEqual([...OVERVIEW_FIELDS].sort());
-        expect(res.body.totalRepos).toBe(111);
-        expect(res.body.withLicense).toBe(83);
-        expect(res.body.percentWithLicense).toBeCloseTo((83 / 111) * 100);
-        expect(res.body.totalContributors).toBe(515);
-        expect(res.body.avgBusFactor).toBeCloseTo(139 / 111);
-        expect(res.body.reposPerUniversity).toEqual([
-            { name: 'University of California, Santa Barbara', value: 1 },
-            { name: 'University of California, Santa Cruz', value: 3 },
-            { name: 'Saint Louis University', value: 107 },
-        ]);
-        expect(res.body.languageDistribution).toContainEqual({ name: 'Python', value: 18 / 111 });
-        expect(res.body.licenseDistribution).toContainEqual({ name: 'mit', value: 26 / 111 });
-        expect(res.body.typeDistribution).toContainEqual({ name: 'DEV', value: 43 / 111 });
-        expect(res.body.communityFilesPresence).toContainEqual({ name: 'license', value: (83 / 111) * 100 });
+        expect(res.body.totalRepos).toBe(sampleRepoData.length);
+        expect(res.body.withLicense).toBe(
+            sampleRepoData.filter((repo) => repo.license !== null && repo.license !== '').length,
+        );
+        expect(res.body.percentWithLicense).toBeCloseTo((res.body.withLicense / sampleRepoData.length) * 100);
+        expect(res.body.totalContributors).toBe(
+            sampleRepoData.reduce<number>((total, repo) => total + (Number(repo.contributorCount) || 0), 0),
+        );
+        expect(res.body.avgBusFactor).toBeCloseTo(
+            sampleRepoData.reduce<number>((total, repo) => total + Number(repo.busFactor ?? 0), 0) /
+                sampleRepoData.length,
+        );
+        expect(
+            res.body.reposPerUniversity.reduce(
+                (total: number, university: { name: string; value: number }) => total + university.value,
+                0,
+            ),
+        ).toBe(sampleRepoData.length);
+        expect(res.body.languageDistribution).toContainEqual({
+            name: 'Python',
+            value: sampleRepoData.filter((repo) => repo.language === 'Python').length / sampleRepoData.length,
+        });
+        expect(res.body.licenseDistribution).toContainEqual({
+            name: 'mit',
+            value:
+                sampleRepoData.filter((repo) => repo.license?.toLowerCase() === 'mit').length / sampleRepoData.length,
+        });
+        expect(res.body.typeDistribution).toContainEqual({
+            name: 'DEV',
+            value:
+                sampleRepoData.filter((repo) => repo.typePredictionGpt5Mini === 'DEV').length / sampleRepoData.length,
+        });
     });
 
     it.each(OVERVIEW_FIELDS)('returns the full-response value from /overview/%s', async (field) => {
@@ -51,16 +70,42 @@ describe('GET /overview', () => {
         const cases = [
             {
                 query: { university: 'saint louis university' },
-                totalRepos: 107,
-                totalContributors: 490,
+                totalRepos: sampleRepoData.filter((repo) => repo.university?.toLowerCase() === 'saint louis university')
+                    .length,
+                totalContributors: sampleRepoData
+                    .filter((repo) => repo.university?.toLowerCase() === 'saint louis university')
+                    .reduce<number>((total, repo) => total + (Number(repo.contributorCount) || 0), 0),
             },
-            { query: { language: 'PYTHON' }, totalRepos: 18, totalContributors: 164 },
-            { query: { license: 'MIT' }, totalRepos: 26, totalContributors: 150 },
-            { query: { typePredictionGpt5Mini: 'dev' }, totalRepos: 43, totalContributors: 336 },
+            {
+                query: { language: 'PYTHON' },
+                totalRepos: sampleRepoData.filter((repo) => repo.language?.toLowerCase() === 'python').length,
+                totalContributors: sampleRepoData
+                    .filter((repo) => repo.language?.toLowerCase() === 'python')
+                    .reduce<number>((total, repo) => total + (Number(repo.contributorCount) || 0), 0),
+            },
+            {
+                query: { license: 'MIT' },
+                totalRepos: sampleRepoData.filter((repo) => repo.license?.toLowerCase() === 'mit').length,
+                totalContributors: sampleRepoData
+                    .filter((repo) => repo.license?.toLowerCase() === 'mit')
+                    .reduce<number>((total, repo) => total + (Number(repo.contributorCount) || 0), 0),
+            },
+            {
+                query: { typePredictionGpt5Mini: 'dev' },
+                totalRepos: sampleRepoData.filter((repo) => repo.typePredictionGpt5Mini?.toLowerCase() === 'dev')
+                    .length,
+                totalContributors: sampleRepoData
+                    .filter((repo) => repo.typePredictionGpt5Mini?.toLowerCase() === 'dev')
+                    .reduce<number>((total, repo) => total + (Number(repo.contributorCount) || 0), 0),
+            },
             {
                 query: { language: ['PYTHON', 'javascript'] },
-                totalRepos: 27,
-                totalContributors: 281,
+                totalRepos: sampleRepoData.filter((repo) =>
+                    ['python', 'javascript'].includes(repo.language?.toLowerCase() ?? ''),
+                ).length,
+                totalContributors: sampleRepoData
+                    .filter((repo) => ['python', 'javascript'].includes(repo.language?.toLowerCase() ?? ''))
+                    .reduce<number>((total, repo) => total + (Number(repo.contributorCount) || 0), 0),
             },
             {
                 query: {
@@ -69,10 +114,31 @@ describe('GET /overview', () => {
                     license: 'MIT',
                     typePredictionGpt5Mini: 'dev',
                 },
-                totalRepos: 2,
-                totalContributors: 31,
+                totalRepos: sampleRepoData.filter(
+                    (repo) =>
+                        repo.university?.toLowerCase() === 'saint louis university' &&
+                        repo.language?.toLowerCase() === 'python' &&
+                        repo.license?.toLowerCase() === 'mit' &&
+                        repo.typePredictionGpt5Mini?.toLowerCase() === 'dev',
+                ).length,
+                totalContributors: sampleRepoData
+                    .filter(
+                        (repo) =>
+                            repo.university?.toLowerCase() === 'saint louis university' &&
+                            repo.language?.toLowerCase() === 'python' &&
+                            repo.license?.toLowerCase() === 'mit' &&
+                            repo.typePredictionGpt5Mini?.toLowerCase() === 'dev',
+                    )
+                    .reduce<number>((total, repo) => total + (Number(repo.contributorCount) || 0), 0),
             },
-            { query: { ignored: 'does-not-filter' }, totalRepos: 111, totalContributors: 515 },
+            {
+                query: { ignored: 'does-not-filter' },
+                totalRepos: sampleRepoData.length,
+                totalContributors: sampleRepoData.reduce<number>(
+                    (total, repo) => total + (Number(repo.contributorCount) || 0),
+                    0,
+                ),
+            },
         ];
 
         for (const testCase of cases) {

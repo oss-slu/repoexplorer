@@ -1,25 +1,76 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import SidebarFilters from '../../cmp/SidebarFilters';
+import type { filterConfig } from '../../types/filters';
 
 describe('SidebarFilters', () => {
-    const filters = [
+    const filters: filterConfig[] = [
         {
             key: 'stars',
             label: 'Stars',
-            type: 'slider' as const,
+            type: 'slider',
             min: 0,
             max: 100,
         },
         {
             key: 'language',
             label: 'Language',
-            type: 'text' as const,
+            type: 'text',
             options: ['JavaScript', 'Python', 'Java'],
         },
     ];
 
+    const filtersWithDefaults: filterConfig[] = [
+        {
+            key: 'stars',
+            label: 'Stars',
+            type: 'slider',
+            min: 0,
+            max: 100,
+            defaultValue: 25,
+        },
+        {
+            key: 'language',
+            label: 'Language',
+            type: 'text',
+            options: ['JavaScript', 'Python', 'Java'],
+            defaultValue: 'Python',
+        },
+    ];
+
+    function TestSidebar({ filters }: { filters: filterConfig[] }) {
+        const getDefaults = () => {
+            const defaults: Record<string, string | number> = {};
+
+            filters.forEach((filter) => {
+                defaults[filter.key] =
+                    filter.defaultValue ??
+                    (filter.type === 'slider' ? 0 : (filter.options[0] ?? ''));
+            });
+
+            return defaults;
+        };
+
+        const [values, setValues] =
+            useState<Record<string, string | number>>(getDefaults);
+
+        return (
+            <SidebarFilters
+                filters={filters}
+                values={values}
+                onChange={(key, value) =>
+                    setValues((previous) => ({
+                        ...previous,
+                        [key]: value,
+                    }))
+                }
+                onReset={() => setValues(getDefaults())}
+            />
+        );
+    }
+
     it('renders different filter types', () => {
-        render(<SidebarFilters filters={filters} />);
+        render(<TestSidebar filters={filters} />);
 
         expect(screen.getByText('Stars: 0')).toBeInTheDocument();
         expect(screen.getByText('Language')).toBeInTheDocument();
@@ -31,50 +82,14 @@ describe('SidebarFilters', () => {
     });
 
     it('uses the provided default values', () => {
-        const filtersWithDefaults = [
-            {
-                key: 'stars',
-                label: 'Stars',
-                type: 'slider' as const,
-                min: 0,
-                max: 100,
-                defaultValue: 25,
-            },
-            {
-                key: 'language',
-                label: 'Language',
-                type: 'text' as const,
-                options: ['JavaScript', 'Python', 'Java'],
-                defaultValue: 'Python',
-            },
-        ];
-
-        render(<SidebarFilters filters={filtersWithDefaults} />);
+        render(<TestSidebar filters={filtersWithDefaults} />);
 
         expect(screen.getByText('Stars: 25')).toBeInTheDocument();
         expect(screen.getByRole('combobox')).toHaveValue('Python');
     });
 
     it('resets to the provided default values', () => {
-        const filtersWithDefaults = [
-            {
-                key: 'stars',
-                label: 'Stars',
-                type: 'slider' as const,
-                min: 0,
-                max: 100,
-                defaultValue: 25,
-            },
-            {
-                key: 'language',
-                label: 'Language',
-                type: 'text' as const,
-                options: ['JavaScript', 'Python', 'Java'],
-                defaultValue: 'Python',
-            },
-        ];
-
-        render(<SidebarFilters filters={filtersWithDefaults} />);
+        render(<TestSidebar filters={filtersWithDefaults} />);
 
         fireEvent.change(screen.getByRole('slider'), {
             target: { value: '50' },
@@ -91,7 +106,7 @@ describe('SidebarFilters', () => {
     });
 
     it('updates the filter values when they change', () => {
-        render(<SidebarFilters filters={filters} />);
+        render(<TestSidebar filters={filters} />);
 
         fireEvent.change(screen.getByRole('slider'), {
             target: { value: '50' },
@@ -107,7 +122,7 @@ describe('SidebarFilters', () => {
     });
 
     it('resets the filter values', () => {
-        render(<SidebarFilters filters={filters} />);
+        render(<TestSidebar filters={filters} />);
 
         fireEvent.change(screen.getByRole('slider'), {
             target: { value: '50' },

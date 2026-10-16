@@ -6,22 +6,43 @@ import DataBlock from '../charts/DataBlock';
 import DataTable from '../charts/DataTable';
 import PieChartDiv from '../charts/PieChartDiv';
 
-export default function Overview() {
+type OverviewProps = {
+    filters: Record<string, string | number>;
+};
+
+export default function Overview({ filters }: OverviewProps) {
     const [summary, setSummary] = useState<overviewSummary | null>(null);
     const [error, setError] = useState<string | null>(null);
 
+    const queryString = new URLSearchParams(
+        Object.entries(filters)
+            .filter(([, value]) => value !== 'All' && value !== '')
+            .map(([key, value]) => [key, String(value)]),
+    ).toString();
+
     useEffect(() => {
-        (async () => {
+        const controller = new AbortController();
+
+        const fetchOverview = async () => {
             try {
-                const resp = await fetch(`${API_URL}/overview`);
+                setError(null);
+
+                const resp = await fetch(`${API_URL}/overview?${queryString}`, {
+                    signal: controller.signal,
+                });
 
                 if (!resp.ok) {
                     throw new Error(`Error fetching overview: ${resp.status}`);
                 }
 
                 const json: overviewSummary = await resp.json();
-                setSummary(json);
+
+                if (!controller.signal.aborted) {
+                    setSummary(json);
+                }
             } catch (err) {
+                if (controller.signal.aborted) return;
+
                 console.error(err);
                 setError(
                     err instanceof Error
@@ -29,8 +50,12 @@ export default function Overview() {
                         : 'Failed to load overview',
                 );
             }
-        })();
-    }, []);
+        };
+
+        void fetchOverview();
+
+        return () => controller.abort();
+    }, [queryString]);
 
     if (error) {
         return <div>Failed to load overview: {error}</div>;
@@ -47,6 +72,7 @@ export default function Overview() {
                     <DataTable
                         title="Repositories per University"
                         endpoint="overview/reposPerUniversity"
+                        filters={filters}
                     />
                 </div>
 
@@ -74,28 +100,34 @@ export default function Overview() {
                 <PieChartDiv
                     title="Project Type Distribution"
                     endpoint="overview/typeDistribution"
+                    filters={filters}
                 />
                 <BarChartDiv
                     title="Community Files Presence"
                     endpoint="overview/communityFilesPresence"
+                    filters={filters}
                 />
                 <PieChartDiv
                     title="Language Distribution"
                     endpoint="overview/languageDistribution"
+                    filters={filters}
                 />
                 <PieChartDiv
                     title="License Distribution"
                     endpoint="overview/licenseDistribution"
+                    filters={filters}
                 />
                 <BarChartDiv
                     title="Language Distribution by Type"
                     endpoint="overview/languageDistributionByType"
                     stacked
+                    filters={filters}
                 />
                 <BarChartDiv
                     title="License Distribution by Type"
                     endpoint="overview/licenseDistributionByType"
                     stacked
+                    filters={filters}
                 />
             </div>
         </div>

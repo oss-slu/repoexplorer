@@ -30,7 +30,7 @@ describe('Overview', () => {
             }),
         } as Response);
 
-        render(<Overview />);
+        render(<Overview filters={{}} />);
 
         await waitFor(() => {
             expect(screen.getByText('Total repositories')).toBeInTheDocument();
@@ -80,12 +80,42 @@ describe('Overview', () => {
             status: 500,
         } as Response);
 
-        render(<Overview />);
+        render(<Overview filters={{}} />);
 
         expect(
             await screen.findByText(
                 'Failed to load overview: Error fetching overview: 500',
             ),
         ).toBeInTheDocument();
+    });
+    it('refetches overview data when filters change', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                totalRepos: 42,
+                percentWithLicense: 57.142857,
+                totalContributors: 451,
+                avgBusFactor: 2.833333,
+            }),
+        } as Response);
+
+        const { rerender } = render(<Overview filters={{}} />);
+
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+        });
+
+        rerender(<Overview filters={{ language: 'Python' }} />);
+
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+        });
+
+        expect(fetchMock).toHaveBeenLastCalledWith(
+            expect.stringContaining('language=Python'),
+            expect.objectContaining({
+                signal: expect.any(AbortSignal),
+            }),
+        );
     });
 });

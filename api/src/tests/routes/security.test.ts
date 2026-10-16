@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { createApp } from '../../app';
+import sampleSecrData from '../../../data/sample/sampleSecrData.json';
 
 const SECURITY_FIELDS = ['securityScorecardByRepo', 'avgScorePerMetric'] as const;
 
@@ -9,29 +10,8 @@ describe('GET /security', () => {
 
         expect(res.status).toBe(200);
         expect(Object.keys(res.body).sort()).toEqual([...SECURITY_FIELDS].sort());
-        expect(res.body.securityScorecardByRepo).toHaveLength(100);
-        expect(res.body.securityScorecardByRepo[0]).toEqual({
-            htmlUrl: 'https://github.com/faridani/PyDATA',
-            binaryArtifacts: 10,
-            branchProtection: 0,
-            ciTests: -1,
-            ciiBestPractices: 0,
-            codeReview: 0,
-            contributors: 0,
-            dangerousWorkflow: -1,
-            dependencyUpdateTool: 0,
-            fuzzing: 0,
-            license: 0,
-            maintained: 0,
-            packaging: -1,
-            pinnedDependencies: -1,
-            sast: 0,
-            securityPolicy: 0,
-            signedReleases: -1,
-            tokenPermissions: -1,
-            vulnerabilities: 10,
-            totalScore: 2.2,
-        });
+        expect(res.body.securityScorecardByRepo).toHaveLength(sampleSecrData.length);
+        expect(res.body.securityScorecardByRepo[0]).toEqual(sampleSecrData[0]);
         expect(res.body.avgScorePerMetric).toContainEqual({ name: 'packaging', value: 10 });
     });
 
@@ -46,9 +26,18 @@ describe('GET /security', () => {
 
     it('preserves license filtering and ignores unknown parameters', async () => {
         const cases = [
-            { query: { license: '9' }, scorecardRows: 11 },
-            { query: { license: ['0', '9'] }, scorecardRows: 66 },
-            { query: { license: '10', ignored: 'does-not-filter' }, scorecardRows: 34 },
+            {
+                query: { license: '9' },
+                scorecardRows: sampleSecrData.filter((repo) => repo.license === 9).length,
+            },
+            {
+                query: { license: ['0', '9'] },
+                scorecardRows: sampleSecrData.filter((repo) => repo.license === 0 || repo.license === 9).length,
+            },
+            {
+                query: { license: '10', ignored: 'does-not-filter' },
+                scorecardRows: sampleSecrData.filter((repo) => repo.license === 10).length,
+            },
         ];
 
         for (const testCase of cases) {

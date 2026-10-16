@@ -16,6 +16,18 @@ export function filterData<T extends Record<string, unknown>>(
             if (mode === 'exact') {
                 return value.some((v) => String(v).toLowerCase() === String(rowValue).toLowerCase());
             }
+
+            if (mode === 'min') {
+                const minValue = Number(value[0]);
+                const numericRowValue = Number(rowValue);
+
+                if (!Number.isFinite(minValue) || rowValue == null || !Number.isFinite(numericRowValue)) {
+                    return false;
+                }
+
+                return numericRowValue >= minValue;
+            }
+
             return true;
         }),
     );

@@ -99,6 +99,9 @@ describe('HeatmapTable', () => {
 
         expect(fetchMock).toHaveBeenCalledWith(
             expect.stringContaining('/security/avgScorePerMetric'),
+            expect.objectContaining({
+                signal: expect.any(AbortSignal),
+            }),
         );
     });
 });

@@ -11,14 +11,30 @@ type impactSummary = {
     totalContributors?: number;
 };
 
-export default function Impact() {
+type ImpactProps = {
+    filters: Record<string, string | number>;
+};
+
+export default function Impact({ filters }: ImpactProps) {
     const [summary, setSummary] = useState<impactSummary | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const queryString = new URLSearchParams(
+        Object.entries(filters)
+            .filter(([, value]) => value !== 'All' && value !== '')
+            .map(([key, value]) => [key, String(value)]),
+    ).toString();
 
     useEffect(() => {
-        (async () => {
+        const controller = new AbortController();
+
+        const fetchData = async () => {
             try {
-                const resp = await fetch(`${API_URL}/impact`);
+                setError(null);
+                setSummary(null);
+
+                const resp = await fetch(`${API_URL}/impact?${queryString}`, {
+                    signal: controller.signal,
+                });
 
                 if (!resp.ok) {
                     throw new Error(
@@ -27,8 +43,15 @@ export default function Impact() {
                 }
 
                 const json: impactSummary = await resp.json();
-                setSummary(json);
+
+                if (!controller.signal.aborted) {
+                    setSummary(json);
+                }
             } catch (err) {
+                if (controller.signal.aborted) {
+                    return;
+                }
+
                 console.error(err);
                 setError(
                     err instanceof Error
@@ -36,8 +59,12 @@ export default function Impact() {
                         : 'Failed to load impact dashboard',
                 );
             }
-        })();
-    }, []);
+        };
+
+        void fetchData();
+
+        return () => controller.abort();
+    }, [queryString]);
 
     if (error) {
         return <div>Failed to load impact dashboard: {error}</div>;
@@ -54,6 +81,7 @@ export default function Impact() {
                     <DataTable
                         title="Impact Indicators per University"
                         endpoint="impact/impactIndicatorsPerUniversity"
+                        filters={filters}
                     />
                 </div>
 
@@ -81,18 +109,22 @@ export default function Impact() {
                 <BarChartDiv
                     title="Stars Distribution"
                     endpoint="impact/starsDistribution"
+                    filters={filters}
                 />
                 <BarChartDiv
                     title="Forks Distribution"
                     endpoint="impact/forksDistribution"
+                    filters={filters}
                 />
                 <BarChartDiv
                     title="Release Downloads Distribution"
                     endpoint="impact/releaseDownloadsDistribution"
+                    filters={filters}
                 />
                 <BarChartDiv
                     title="Contributors Distribution"
                     endpoint="impact/contributorsDistribution"
+                    filters={filters}
                 />
             </div>
         </div>

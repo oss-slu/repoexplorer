@@ -35,7 +35,7 @@ vi.mock('../../../cmp/charts/HeatmapTable', () => ({
 
 describe('Security', () => {
     it('renders the security dashboard', async () => {
-        render(<Security />);
+        render(<Security filters={{}} />);
 
         expect(
             screen.getByText(
@@ -50,7 +50,7 @@ describe('Security', () => {
 });
 
 it('passes the correct configuration to each chart', () => {
-    render(<Security />);
+    render(<Security filters={{}} />);
 
     expect(screen.getByTestId('scorecard-table')).toHaveAttribute(
         'data-endpoint',

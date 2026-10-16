@@ -10,22 +10,50 @@ import {
 import { API_URL, PIE_COLORS } from '../../consts';
 import type { chartProps, pieSlice } from '../../types/charts';
 
-export default function PieChartDiv({ title, endpoint }: chartProps) {
+export default function PieChartDiv({
+    title,
+    endpoint,
+    filters = {},
+}: chartProps & {
+    filters?: Record<string, string | number>;
+}) {
     const [data, setData] = useState<{ name: string; value: number }[] | null>(
         null,
     );
     const [error, setError] = useState<string | null>(null);
 
+    const queryString = new URLSearchParams(
+        Object.entries(filters)
+            .filter(([, value]) => value !== 'All' && value !== '')
+            .map(([key, value]) => [key, String(value)]),
+    ).toString();
+
     useEffect(() => {
-        (async () => {
+        const controller = new AbortController();
+
+        const fetchData = async () => {
             try {
-                const resp = await fetch(`${API_URL}/${endpoint}`);
+                setError(null);
+                setData(null);
+
+                const url = `${API_URL}/${endpoint}${
+                    queryString ? `?${queryString}` : ''
+                }`;
+
+                const resp = await fetch(url, {
+                    signal: controller.signal,
+                });
 
                 if (!resp.ok) {
                     throw new Error(`Error fetching data: ${resp.status}`);
                 }
 
                 const json = await resp.json();
+
+                if (controller.signal.aborted) {
+                    return;
+                }
+
                 const arr: pieSlice[] = Array.isArray(json)
                     ? json
                     : (Object.values(json)[0] as pieSlice[]);
@@ -37,13 +65,21 @@ export default function PieChartDiv({ title, endpoint }: chartProps) {
 
                 setData(withColors);
             } catch (err) {
+                if (controller.signal.aborted) {
+                    return;
+                }
+
                 console.error(err);
                 setError(
                     err instanceof Error ? err.message : 'Failed to load data',
                 );
             }
-        })();
-    }, [endpoint]);
+        };
+
+        void fetchData();
+
+        return () => controller.abort();
+    }, [endpoint, queryString]);
 
     if (error)
         return (
@@ -51,6 +87,7 @@ export default function PieChartDiv({ title, endpoint }: chartProps) {
                 Failed to load {title}: {error}
             </div>
         );
+
     if (!data) return <div>Loading {title}...</div>;
 
     return (

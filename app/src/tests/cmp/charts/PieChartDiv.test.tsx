@@ -95,6 +95,9 @@ describe('PieChartDiv', () => {
 
         expect(fetchMock).toHaveBeenCalledWith(
             expect.stringContaining('/overview/languageDistribution'),
+            expect.objectContaining({
+                signal: expect.any(AbortSignal),
+            }),
         );
     });
 });

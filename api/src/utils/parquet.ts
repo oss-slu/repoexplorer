@@ -60,7 +60,11 @@ export async function findRecentParquetInDir(runMode: parqFileOpts): Promise<str
 
     const entries: Dirent<string>[] = await fs.readdir(dir, { withFileTypes: true });
     const parqFiles = entries.filter(
-        (f) => f.isFile() && f.name.toLowerCase().endsWith('.parquet') && f.name.includes(runMode),
+        (f) =>
+            f.isFile() &&
+            f.name.toLowerCase().endsWith('.parquet') &&
+            (f.name.toUpperCase().includes(runMode) ||
+                (runMode === 'REPO' && f.name.toLowerCase().startsWith('repositories_'))),
     );
     if (parqFiles.length === 0) return '';
 

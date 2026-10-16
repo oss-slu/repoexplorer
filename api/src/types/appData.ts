@@ -1,4 +1,4 @@
-export type filterMode = 'exact';
+export type filterMode = 'exact' | 'min';
 
 export type repoData = {
     university: string;

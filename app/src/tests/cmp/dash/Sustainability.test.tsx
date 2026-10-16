@@ -24,7 +24,7 @@ describe('Sustainability', () => {
             }),
         } as Response);
 
-        render(<Sustainability />);
+        render(<Sustainability filters={{}} />);
 
         await waitFor(() => {
             expect(screen.getByText('Average bus factor')).toBeInTheDocument();
@@ -58,7 +58,7 @@ describe('Sustainability', () => {
             status: 500,
         } as Response);
 
-        render(<Sustainability />);
+        render(<Sustainability filters={{}} />);
 
         expect(
             await screen.findByText(

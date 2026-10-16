@@ -8,40 +8,76 @@ export default function DataTable({
     endpoint,
     maxRows,
     scrollable = false,
-}: chartProps & { scrollable?: boolean }) {
+    filters = {},
+}: chartProps & {
+    scrollable?: boolean;
+    filters?: Record<string, string | number>;
+}) {
     const [data, setData] = useState<Record<string, unknown>[]>([]);
     const [loading, setLoading] = useState<boolean>(Boolean(endpoint));
     const [error, setError] = useState<string>('');
+
+    const queryString = new URLSearchParams(
+        Object.entries(filters)
+            .filter(([, value]) => value !== 'All' && value !== '')
+            .map(([key, value]) => [key, String(value)]),
+    ).toString();
 
     useEffect(() => {
         if (!endpoint) {
             return;
         }
 
-        (async () => {
+        const controller = new AbortController();
+
+        const fetchData = async () => {
             try {
-                const resp = await fetch(`${API_URL}/${endpoint}`);
+                setLoading(true);
+                setError('');
+
+                const url = `${API_URL}/${endpoint}${
+                    queryString ? `?${queryString}` : ''
+                }`;
+
+                const resp = await fetch(url, {
+                    signal: controller.signal,
+                });
 
                 if (!resp.ok) {
                     throw new Error(`Error fetching data: ${resp.status}`);
                 }
 
                 const json = await resp.json();
+
+                if (controller.signal.aborted) {
+                    return;
+                }
+
                 const arr: Record<string, unknown>[] = Array.isArray(json)
                     ? json
                     : (Object.values(json)[0] as Record<string, unknown>[]);
 
                 setData(arr);
             } catch (err) {
+                if (controller.signal.aborted) {
+                    return;
+                }
+
                 console.error(err);
                 setError(
                     err instanceof Error ? err.message : 'Failed to load data',
                 );
             } finally {
-                setLoading(false);
+                if (!controller.signal.aborted) {
+                    setLoading(false);
+                }
             }
-        })();
-    }, [endpoint]);
+        };
+
+        void fetchData();
+
+        return () => controller.abort();
+    }, [endpoint, queryString]);
 
     if (loading) {
         return <div>Loading {title}...</div>;

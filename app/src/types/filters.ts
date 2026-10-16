@@ -19,6 +19,9 @@ export type filterConfig = sliderFilterConfig | textFilterConfig;
 
 export type sidebarFiltersProps = {
     filters: filterConfig[];
+    values: Record<string, string | number>;
+    onChange: (key: string, value: string | number) => void;
+    onReset: () => void;
 };
 
 export type sliderFilterProps = {

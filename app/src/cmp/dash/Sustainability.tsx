@@ -30,14 +30,33 @@ function getHeatmapColor(value: number) {
     return `rgb(${red}, 255, 0)`;
 }
 
-export default function Sustainability() {
+type SustainabilityProps = {
+    filters: Record<string, string | number>;
+};
+
+export default function Sustainability({ filters }: SustainabilityProps) {
     const [summary, setSummary] = useState<sustainabilitySummary | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const queryString = new URLSearchParams(
+        Object.entries(filters)
+            .filter(([, value]) => value !== 'All' && value !== '')
+            .map(([key, value]) => [key, String(value)]),
+    ).toString();
 
     useEffect(() => {
-        (async () => {
+        const controller = new AbortController();
+
+        const fetchData = async () => {
             try {
-                const resp = await fetch(`${API_URL}/sustainability`);
+                setError(null);
+                setSummary(null);
+
+                const resp = await fetch(
+                    `${API_URL}/sustainability?${queryString}`,
+                    {
+                        signal: controller.signal,
+                    },
+                );
 
                 if (!resp.ok) {
                     throw new Error(
@@ -46,8 +65,15 @@ export default function Sustainability() {
                 }
 
                 const json: sustainabilitySummary = await resp.json();
-                setSummary(json);
+
+                if (!controller.signal.aborted) {
+                    setSummary(json);
+                }
             } catch (err) {
+                if (controller.signal.aborted) {
+                    return;
+                }
+
                 console.error(err);
                 setError(
                     err instanceof Error
@@ -55,8 +81,12 @@ export default function Sustainability() {
                         : 'Failed to load sustainability',
                 );
             }
-        })();
-    }, []);
+        };
+
+        void fetchData();
+
+        return () => controller.abort();
+    }, [queryString]);
 
     if (error) {
         return <div>Failed to load sustainability: {error}</div>;
@@ -73,6 +103,7 @@ export default function Sustainability() {
                     <DataTable
                         title="Sustainability Indicators per University"
                         endpoint="sustainability/sustainabilityIndicatorsPerUniversity"
+                        filters={filters}
                     />
                 </div>
 
@@ -94,6 +125,7 @@ export default function Sustainability() {
                     endpoint="sustainability/communityFiles"
                     stacked
                     seriesKeys={['DEV', 'DOCS', 'EDU', 'WEB']}
+                    filters={filters}
                 />
                 <div className="community-files-stars dashboard-table-col">
                     <h2>Community Files by # Stars</h2>
@@ -140,11 +172,13 @@ export default function Sustainability() {
                 <BarChartDiv
                     title="Bus Factor Distribution"
                     endpoint="sustainability/busFactorDistribution"
+                    filters={filters}
                 />
 
                 <BarChartDiv
                     title="Contributor Count Distribution"
                     endpoint="sustainability/contributorCountDistribution"
+                    filters={filters}
                 />
             </div>
         </div>

@@ -132,6 +132,9 @@ describe('BarChartDiv', () => {
 
         expect(fetchMock).toHaveBeenCalledWith(
             expect.stringContaining('/overview/communityFilesPresence'),
+            expect.objectContaining({
+                signal: expect.any(AbortSignal),
+            }),
         );
     });
 });

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { repoData, orgsData, secrData } from './types/appData';
+import type { repoData, orgsData, secrData, filterMode } from './types/appData';
 
 // PATHS RELATIVE TO /api
 // consts.ts MUST remain at /api/src/consts.ts for this to work
@@ -25,17 +25,22 @@ export const BASE_SUSTAINABILITY = '/sustainability';
 export const BASE_SECURITY = '/security';
 export const BASE_ORGANIZATION = '/organization';
 
-export const FILTERABLE_REPO_FIELDS: Partial<Record<keyof repoData, 'exact'>> = {
+export const FILTERABLE_REPO_FIELDS: Partial<Record<keyof repoData, filterMode>> = {
     university: 'exact',
     language: 'exact',
     license: 'exact',
     typePredictionGpt5Mini: 'exact',
+    affiliationPredictionGpt5Mini: 'min',
+    stargazersCount: 'min',
+    forksCount: 'min',
+    releaseDownloads: 'min',
 };
 
 export const FILTERABLE_SECR_FIELDS: Partial<Record<keyof secrData, 'exact'>> = {
     license: 'exact',
 };
 
-export const FILTERABLE_ORGS_FIELDS: Partial<Record<keyof orgsData, 'exact'>> = {
+export const FILTERABLE_ORGS_FIELDS: Partial<Record<keyof orgsData, filterMode>> = {
     university: 'exact',
+    affiliationPredictionOrgs: 'min',
 };

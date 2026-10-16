@@ -17,6 +17,7 @@ export default function SliderFilter({
                 type="range"
                 min={min}
                 max={max}
+                step={max <= 1 ? 0.1 : 1}
                 value={value}
                 onChange={(event) => onChange(Number(event.target.value))}
             />
