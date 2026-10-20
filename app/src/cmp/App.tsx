@@ -5,6 +5,7 @@ import Security from './dash/Security';
 import Sustainability from './dash/Sustainability';
 import Organization from './dash/Organization';
 import Impact from './dash/Impact';
+import Browse from './dash/browseRepos';
 import aboutText from '../../../docs/about.md?raw';
 import Markdown from 'react-markdown';
 import SidebarFilters from './SidebarFilters';
@@ -249,7 +250,11 @@ function App() {
                                 {repoTab === 'Impact' && (
                                     <Impact filters={repoFilterValues} />
                                 )}
+                                {repoTab === 'Browse' && (
+                                    <Browse />
+                                )}
                                 {repoTab !== 'Overview' &&
+                                    repoTab !== 'Browse' &&
                                     repoTab !== 'Security' &&
                                     repoTab !== 'Sustainability' &&
                                     repoTab !== 'Impact' && (

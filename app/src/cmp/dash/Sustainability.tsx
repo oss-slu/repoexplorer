@@ -110,6 +110,7 @@ export default function Sustainability({ filters }: SustainabilityProps) {
                         title="Sustainability Indicators per University"
                         endpoint="sustainability/sustainabilityIndicatorsPerUniversity"
                         filters={filters}
+                        showRowMessage
                     />
                 </div>
 

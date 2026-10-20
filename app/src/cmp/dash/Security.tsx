@@ -21,6 +21,7 @@ export default function Security({ filters }: SecurityProps) {
                     endpoint="security/securityScorecardByRepo"
                     scrollable
                     filters={securityFilters}
+                    showRowMessage
                 />
 
                 <HeatmapTable

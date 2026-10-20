@@ -79,6 +79,7 @@ export default function Overview({ filters }: OverviewProps) {
                         title="Repositories per University"
                         endpoint="overview/reposPerUniversity"
                         filters={filters}
+                        showRowMessage
                     />
                 </div>
 

@@ -87,6 +87,7 @@ export default function Impact({ filters }: ImpactProps) {
                         title="Impact Indicators per University"
                         endpoint="impact/impactIndicatorsPerUniversity"
                         filters={filters}
+                        showRowMessage
                     />
                 </div>
 
