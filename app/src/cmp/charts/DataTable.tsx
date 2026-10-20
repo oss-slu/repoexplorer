@@ -114,28 +114,33 @@ export default function DataTable({
     // Filter data based on search query
     const filteredData = data.filter((row) => {
         if (!searchQuery) return true;
-        
+
         // Check if any value in the row matches the search string (case-insensitive)
-        return Object.values(row).some((val) => 
-            String(val).toLowerCase().includes(searchQuery.toLowerCase())
+        return Object.values(row).some((val) =>
+            String(val).toLowerCase().includes(searchQuery.toLowerCase()),
         );
     });
 
     const handleDownload = () => {
         if (filteredData.length === 0) return;
-        
+
         const keys = Object.keys(filteredData[0]);
         const csvContent = [
             keys.join(','),
             ...filteredData.map((row) =>
-                keys.map((k) => `"${String(row[k] ?? '')}"`).join(',')
+                keys.map((k) => `"${String(row[k] ?? '')}"`).join(','),
             ),
         ].join('\n');
 
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const blob = new Blob([csvContent], {
+            type: 'text/csv;charset=utf-8;',
+        });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.setAttribute('download', `${String(title).replace(/\s+/g, '_')}_data.csv`);
+        link.setAttribute(
+            'download',
+            `${String(title).replace(/\s+/g, '_')}_data.csv`,
+        );
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -147,7 +152,15 @@ export default function DataTable({
 
             {showSearch && (
                 <div style={{ marginBottom: '16px' }}>
-                    <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>Search</label>
+                    <label
+                        style={{
+                            display: 'block',
+                            marginBottom: '4px',
+                            fontWeight: 'bold',
+                        }}
+                    >
+                        Search
+                    </label>
                     <input
                         type="text"
                         placeholder="Search table..."
@@ -158,7 +171,7 @@ export default function DataTable({
                             width: '100%',
                             borderRadius: '4px',
                             border: '1px solid #ccc',
-                            boxSizing: 'border-box'
+                            boxSizing: 'border-box',
                         }}
                     />
                 </div>
@@ -208,10 +221,14 @@ export default function DataTable({
                                 .map((row, index) => (
                                     <tr
                                         key={index}
-                                        onClick={() => onRowClick && onRowClick(row)}
+                                        onClick={() =>
+                                            onRowClick && onRowClick(row)
+                                        }
                                         style={{
                                             borderBottom: '1px solid #eee',
-                                            cursor: onRowClick ? 'pointer' : 'default',
+                                            cursor: onRowClick
+                                                ? 'pointer'
+                                                : 'default',
                                         }}
                                     >
                                         {headers.map((header) => (
@@ -223,7 +240,9 @@ export default function DataTable({
                                             >
                                                 {typeof row[header] === 'number'
                                                     ? Number(
-                                                          row[header].toFixed(2),
+                                                          row[header].toFixed(
+                                                              2,
+                                                          ),
                                                       ).toString()
                                                     : String(row[header] ?? '')}
                                             </td>
@@ -236,8 +255,19 @@ export default function DataTable({
             )}
 
             {showRowMessage && (
-                <p style={{ marginTop: '16px', fontSize: '14px', color: '#333' }}>
-                    Viewing rows {filteredData.length > 0 ? 1 : 0} through {Math.min(maxRows ?? filteredData.length, filteredData.length)} of {filteredData.length}
+                <p
+                    style={{
+                        marginTop: '16px',
+                        fontSize: '14px',
+                        color: '#333',
+                    }}
+                >
+                    Viewing rows {filteredData.length > 0 ? 1 : 0} through{' '}
+                    {Math.min(
+                        maxRows ?? filteredData.length,
+                        filteredData.length,
+                    )}{' '}
+                    of {filteredData.length}
                 </p>
             )}
 
@@ -251,7 +281,7 @@ export default function DataTable({
                         backgroundColor: '#f1f1f1',
                         border: '1px solid #ccc',
                         borderRadius: '4px',
-                        cursor: 'pointer'
+                        cursor: 'pointer',
                     }}
                 >
                     Download

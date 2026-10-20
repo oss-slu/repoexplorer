@@ -250,9 +250,7 @@ function App() {
                                 {repoTab === 'Impact' && (
                                     <Impact filters={repoFilterValues} />
                                 )}
-                                {repoTab === 'Browse' && (
-                                    <Browse />
-                                )}
+                                {repoTab === 'Browse' && <Browse />}
                                 {repoTab !== 'Overview' &&
                                     repoTab !== 'Browse' &&
                                     repoTab !== 'Security' &&
