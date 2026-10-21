@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { API_URL } from '../../consts';
+import { API_URL, MAX_VISIBLE_ROWS } from '../../consts';
 import type { overviewSummary } from '../../types/dash';
 import BarChartDiv from '../charts/BarChartDiv';
 import DataBlock from '../charts/DataBlock';
@@ -79,6 +79,9 @@ export default function Overview({ filters }: OverviewProps) {
                         title="Repositories per University"
                         endpoint="overview/reposPerUniversity"
                         filters={filters}
+                        showRowMessage
+                        scrollable
+                        maxRows={MAX_VISIBLE_ROWS}
                     />
                 </div>
 

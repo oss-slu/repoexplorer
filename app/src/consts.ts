@@ -12,3 +12,5 @@ export const PIE_COLORS = [
     '#f97316',
     '#14b8a6',
 ];
+
+export const MAX_VISIBLE_ROWS = 5;

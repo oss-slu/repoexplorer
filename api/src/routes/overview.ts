@@ -67,4 +67,9 @@ for (const endpoint of endpoints) {
     });
 }
 
+router.get(`${BASE_OVERVIEW}/repositories`, (req, res) => {
+    const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
+    res.json(filtered);
+});
+
 export default router;
