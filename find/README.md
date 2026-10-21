@@ -1,75 +1,110 @@
-# Repository finder GitHub client
+# Repository scraping finder
 
-The `find` package includes a reusable GitHub REST client and a pagination helper. Create one `GitHubRequestClient` for each scraping run and pass that instance to every request in the run. Its queue coordinates concurrency and rate-limit cooldowns across all callers that share it.
+The finder discovers public GitHub repositories associated with configured universities, enriches each repository with GitHub metadata, and upserts complete results into `public.repository_scraping`. It is separate from the dashboard API, which continues to read its existing sample data.
 
-## Configuration
+Search results are candidates, not verified university affiliations. The scraper does not classify repositories or infer affiliations, project types, or bus factor. Configure search phrases carefully and review candidate quality downstream.
 
-Pass configuration when constructing the client. The utility does not load `.env` files, so callers can provide a token or other settings from their own configuration layer.
+## Install and build
 
-```ts
-import { GitHubRequestClient } from './src/scraping';
+From this directory:
 
-const github = new GitHubRequestClient({
-    token: process.env.GITHUB_TOKEN,
-    timeoutMs: 15_000,
-    maxRetries: 3,
-    retryBaseDelayMs: 250,
-    retryMaxDelayMs: 8_000,
-    concurrency: 1,
-});
+```sh
+npm ci
+npm test
+npm run lint
+npm run typecheck
+npm run build
 ```
 
-The client defaults to `https://api.github.com`, serial dispatch, a 15 second request timeout, and three retries. `baseUrl`, `headers`, `fetch`, `now`, `random`, and `sleep` can be injected for GitHub Enterprise deployments and deterministic tests. Primary rate limits track search paths separately from ordinary REST paths. Successful responses that report zero remaining requests also pause that resource until its reset time. Secondary rate limits pause all queued requests on the client. Rate limited `403` and `429` responses honor `Retry-After` and exhausted primary quota reset times. Without `Retry-After`, secondary limits wait at least one minute; repeated secondary limits increase the delay exponentially. These waits follow [GitHub's rate-limit guidance](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api#handle-rate-limit-errors-appropriately).
+The build produces the import-safe library at `dist/scraping.js` and the CLI at `dist/cli.js`. Build before starting the CLI:
 
-## Requests and response contracts
-
-`request<T>()` accepts an API path or an absolute URL on the configured API origin, optional query parameters, headers, an `AbortSignal`, and a response type. JSON is the default. Each successful call returns `{ data, status, headers, url }`.
-
-```ts
-const repo = await github.request<{ full_name: string }>(
-    '/repos/octo-org/octo-repo',
-);
-console.log(
-    repo.data.full_name,
-    repo.status,
-    repo.headers.get('x-ratelimit-remaining'),
-);
+```sh
+npm start -- --config config/universities.example.json
 ```
 
-For raw repository content, select text mode and the raw media type:
+## Configure universities
 
-```ts
-const readme = await github.request(
-    '/repos/octo-org/octo-repo/contents/README.md',
-    {
-        responseType: 'text',
-        headers: { Accept: 'application/vnd.github.raw+json' },
-    },
-);
+Copy `config/universities.example.json` to `config/universities.json` and set the universities to collect. Each `key` is stored in the staging table's `university` column; use the same full name as the final dataset if the rows should align with it. `fullName` and `acronym` supply the default search phrases. No production university list is embedded in the code.
+
+```json
+{
+    "repositoryConcurrency": 4,
+    "databaseBatchSize": 100,
+    "universities": [
+        {
+            "key": "Saint Louis University",
+            "fullName": "Saint Louis University",
+            "acronym": "SLU",
+            "queries": {
+                "repositories": "\"Saint Louis University\" in:name,description archived:false size:>0",
+                "organizations": "\"SLU\" in:name,login type:org",
+                "users": "\"SLU\" in:name,login type:user"
+            }
+        }
+    ]
+}
 ```
 
-HTTP failures reject with `GitHubRequestError`, which includes the status, response data, headers, and URL. Authentication, permission, validation, and missing-resource errors are surfaced immediately. Conflicts (`409`, `412`), gateway errors (`502`, `503`, `504`), rate limits, transient network failures, and timeouts use bounded retries with exponential backoff and jitter. Exhausted HTTP retries still throw the final HTTP error; exhausted network or timeout retries throw `GitHubNetworkError` or `GitHubTimeoutError`. Invalid JSON on successful responses throws `GitHubResponseParseError`. Non-JSON HTTP error bodies are preserved as text, so gateway errors and rate limits still receive the appropriate retries. Caller cancellation rejects with the abort reason and is not retried.
+`queries` is optional. The defaults are:
 
-## Pagination
+- Repositories: `"<fullName>" in:name,description archived:false size:>0 is:public`
+- Organizations: `"<acronym>" in:name,login type:org`
+- Users: `"<acronym>" in:name,login type:user`
 
-`paginateGitHub<T>()` follows `Link` headers through the same client queue. It accepts list endpoints that return arrays and search endpoints that return an `{ items: [...] }` object. The result contains all items, the final page's status and headers, and `pageCount`.
+GitHub Search returns at most 1,000 results for a query. The run fails that university if search reports incomplete results, hits this result cap, or pagination returns fewer items than `total_count`. Narrow the query or provide a more specific query in the configuration and rerun. Discovery never silently treats a partial search as complete.
 
-```ts
-const searchResults = await paginateGitHub<{ full_name: string }>(
-    github,
-    '/search/repositories',
-    { query: { q: 'language:typescript', per_page: 100 } },
-);
+The request contracts follow GitHub's [REST search endpoints](https://docs.github.com/en/rest/search/search), [community profile endpoint](https://docs.github.com/en/rest/metrics/community), and [README/content endpoints](https://docs.github.com/en/rest/repos/contents).
 
-const organizationRepos = await paginateGitHub<{ name: string }>(
-    github,
-    '/orgs/octo-org/repos',
-    { query: { type: 'public', per_page: 100 } },
-);
+The repository worker count defaults to 4 and can be set from 1 to 16. Database batches default to 100 records and can be set from 1 to 500. One shared `GitHubRequestClient` coordinates every request and pagination call in the run, including its retry and rate-limit handling.
+
+## Prepare PostgreSQL
+
+The scraper requires the staging table. For a new database, create the repository's `.env` and start the database service:
+
+```sh
+cd ..
+./scripts/setup-env
+docker compose up --build -d db
 ```
 
-If a page fails, pagination rejects with that page's error rather than returning partial data. Pass an `AbortSignal` in the options to cancel a request while it is active, queued, or waiting for a rate-limit cooldown.
+For an existing database volume, apply the non-destructive migration as the administrator. The complete instructions are in [the database guide](../docs/dev/database.md#add-the-staging-table-to-an-existing-volume). The scraper never creates schema and must connect with the restricted application role.
 
-## Checks
+The finder reads `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD`. The repository `.env` supplies the database name, role, password, and host port. When `PGHOST` is unset, the finder uses `127.0.0.1`; when `PGPORT` is unset, it uses the host port `5433`. From inside Compose, set `PGHOST=db` and `PGPORT=5432`. `GITHUB_TOKEN` is optional but recommended to increase GitHub's rate limits. The CLI loads the repository-root `.env` without replacing values already present in the process environment.
 
-From this directory, run `npm test`, `npm run lint`, `npm run typecheck`, and `npm run build`.
+## Run a scrape
+
+From `find/`, after building:
+
+```sh
+npm start -- --config config/universities.json
+```
+
+Or pass another configuration file. The CLI reports unique repository counts per university, committed associations, and failures. It exits nonzero if a university fails. Each university is discovered and enriched completely before its transaction begins. A failed university writes no rows; a prior successful university remains committed. Repeated successful runs update `(id, university)` rows atomically, preserve downstream analysis fields, and never delete rows that were not rediscovered.
+
+All repository candidates, owner listings, details, README data, release pages, contributor pages, community metadata, and content reads use the shared request client. Documented missing optional files, such as a README `404`, are stored as `NULL`. Authentication and permission errors, exhausted retries, malformed responses, and unexpected API errors fail the university.
+
+## Staging field conventions
+
+The scraper writes every field in the final repository shape plus `scraped_at`. See the [database field map](../docs/dev/database.md#publicrepository_scraping-field-mapping) for the complete source and nullability rules. A few conventions are worth calling out:
+
+- `organization` preserves the existing sample's text marker: `"1"` for repositories owned by an organization, `NULL` for repositories owned by a user.
+- `license` stores the lowercase SPDX identifier, `other` for an existing license without a usable SPDX identifier, and `NULL` when no license is reported.
+- `contributors` is text containing a JSON array of unique contributor logins, such as `["alice","bob"]`. Existing sample data may contain Python-style list text.
+- When the community profile omits issue templates, the finder checks `.github/ISSUE_TEMPLATE`, `ISSUE_TEMPLATE`, and `docs/ISSUE_TEMPLATE` for directory-based templates and issue forms.
+- Community-file columns store file contents. Directory-based issue templates are stored as JSON text with each entry's path and content.
+- GitHub's community profile endpoint does not support forked repositories, so the finder checks the repository root and `.github` directory for their standard community files.
+- `bus_factor`, `affiliation_prediction_gpt5_mini`, and `type_prediction_gpt5_mini` are inserted as `NULL`; reruns preserve values filled by downstream analysis.
+- GitHub IDs and counts must be non-negative safe integers before PostgreSQL binding. Unsafe values fail instead of being rounded by JavaScript.
+
+## Verification
+
+Unit tests use synthetic GitHub responses and do not make live GitHub requests. For actual persistence tests, prepare an isolated PostgreSQL database named with `test`, `integration`, or `verify` in its name and set `FINDER_TEST_DATABASE_URL`. An optional `FINDER_TEST_ADMIN_DATABASE_URL` can point to an administrator connection while the test URL uses the application's restricted role.
+
+The repository includes a temporary Compose harness that creates its own project, credentials, port, and volume, then removes only that project:
+
+```sh
+cd ..
+./scripts/db/verify-find.sh
+```
+
+This exercises the real finder store against PostgreSQL, including insert, rerun/update, same ID under two universities, quoted input, rollback, and connection release. `scripts/db/verify.sh` checks the fresh schema, application-role CRUD, repeatable bootstrap, and preservation of existing tables.

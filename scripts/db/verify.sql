@@ -42,6 +42,20 @@ BEGIN
                     'token_permissions', 'vulnerabilities', 'total_score'
                 ]::TEXT[],
                 ARRAY['html_url']::TEXT[]
+            ),
+            (
+                'repository_scraping',
+                ARRAY[
+                    'university', 'id', 'full_name', 'owner', 'license', 'language', 'html_url',
+                    'description', 'fork', 'created_at', 'updated_at', 'pushed_at', 'homepage',
+                    'size', 'stargazers_count', 'readme', 'watchers_count', 'forks_count',
+                    'open_issues_count', 'watchers', 'organization', 'release_downloads',
+                    'contributors', 'contributor_count', 'bus_factor', 'code_of_conduct_file',
+                    'contributing', 'security_policy', 'issue_templates', 'pull_request_template',
+                    'subscribers_count', 'affiliation_prediction_gpt5_mini',
+                    'type_prediction_gpt5_mini', 'scraped_at'
+                ]::TEXT[],
+                ARRAY['id', 'university']::TEXT[]
             )
         ) AS expected(name, columns, primary_key)
     LOOP
@@ -101,7 +115,11 @@ BEGIN
         OR NOT has_table_privilege(current_user, 'public.security', 'SELECT')
         OR NOT has_table_privilege(current_user, 'public.security', 'INSERT')
         OR NOT has_table_privilege(current_user, 'public.security', 'UPDATE')
-        OR NOT has_table_privilege(current_user, 'public.security', 'DELETE') THEN
+        OR NOT has_table_privilege(current_user, 'public.security', 'DELETE')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping', 'SELECT')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping', 'INSERT')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping', 'UPDATE')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping', 'DELETE') THEN
         RAISE EXCEPTION 'Application role % lacks one or more table CRUD privileges', current_user;
     END IF;
 END;
@@ -180,6 +198,16 @@ VALUES (
     1, 1, -1, -1, 0, 1, -1, -1, 4, 7.25
 );
 
+INSERT INTO public.repository_scraping (
+    university, id, owner, fork, size, stargazers_count, watchers_count, forks_count,
+    open_issues_count, watchers, release_downloads, contributors, contributor_count,
+    subscribers_count, scraped_at
+)
+VALUES (
+    'Issue 58 Verify', 9876543210456, 'verify-owner', 0, 0, 0, 0, 0,
+    0, 0, 0, '[]', 0, 0, '2026-10-20 12:00:00+00'
+);
+
 DO $$
 BEGIN
     IF (
@@ -223,6 +251,19 @@ BEGIN
         RAISE EXCEPTION 'Security sentinel or fractional values did not round-trip';
     END IF;
 
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.repository_scraping
+        WHERE id = 9876543210456
+            AND university = 'Issue 58 Verify'
+            AND scraped_at = '2026-10-20 12:00:00+00'::TIMESTAMPTZ
+            AND bus_factor IS NULL
+            AND affiliation_prediction_gpt5_mini IS NULL
+            AND type_prediction_gpt5_mini IS NULL
+    ) THEN
+        RAISE EXCEPTION 'Repository scraping row did not preserve nullable downstream fields';
+    END IF;
+
     BEGIN
         INSERT INTO public.repositories (
             university, id, owner, fork, size, stargazers_count, watchers_count, forks_count,
@@ -248,5 +289,14 @@ WHERE university = 'Issue 56 Verify A'
 DELETE FROM public.repositories
 WHERE university = 'Issue 56 Verify B'
     AND id = 9876543210123;
+
+UPDATE public.repository_scraping
+SET description = 'CRUD verification'
+WHERE university = 'Issue 58 Verify'
+    AND id = 9876543210456;
+
+DELETE FROM public.repository_scraping
+WHERE university = 'Issue 58 Verify'
+    AND id = 9876543210456;
 
 ROLLBACK;

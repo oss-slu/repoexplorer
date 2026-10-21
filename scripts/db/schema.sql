@@ -92,3 +92,5 @@ SELECT format(
     'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I',
     :'application_user'
 ) \gexec
+
+\ir repository-scraping.sql
