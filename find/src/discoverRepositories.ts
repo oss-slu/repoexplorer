@@ -1,7 +1,5 @@
-import {
-    GitHubPaginationError,
-    paginateGitHub,
-} from './utils/githubPagination';
+import { paginateGitHub } from './utils/githubPagination';
+import { searchGitHub } from './utils/githubSearch';
 import { GitHubRequestClient } from './utils/githubRequest';
 import { allOrThrow, mapWithConcurrency } from './utils/concurrency';
 import type {
@@ -11,11 +9,6 @@ import type {
 
 type OwnerKind = 'Organization' | 'User';
 type DiscoveredOwner = { login: string; kind: OwnerKind };
-
-type SearchResult<T> = {
-    items: T[];
-    totalCount: number;
-};
 
 export type RepositoryDiscovery = {
     candidates: RepositoryCandidate[];
@@ -33,19 +26,19 @@ export async function discoverRepositories(
     const queries = getSearchQueries(university);
     const [repositorySearch, organizationSearch, userSearch] = await allOrThrow(
         [
-            search<unknown>(
+            searchGitHub<unknown>(
                 client,
                 'repositories',
                 queries.repositories,
                 'repository',
             ),
-            search<unknown>(
+            searchGitHub<unknown>(
                 client,
                 'users',
                 queries.organizations,
                 'organization',
             ),
-            search<unknown>(client, 'users', queries.users, 'user'),
+            searchGitHub<unknown>(client, 'users', queries.users, 'user'),
         ],
     );
 
@@ -101,38 +94,6 @@ export function getSearchQueries(
             university.queries?.users ??
             `"${escapeSearchPhrase(university.acronym)}" in:name,login type:user`,
     };
-}
-
-async function search<T>(
-    client: GitHubRequestClient,
-    endpoint: 'repositories' | 'users',
-    query: string,
-    label: string,
-): Promise<SearchResult<T>> {
-    const response = await paginateGitHub<T>(client, `/search/${endpoint}`, {
-        query: { q: query, per_page: 100 },
-    });
-    if (response.searchTotalCount === undefined) {
-        throw new GitHubPaginationError(
-            `GitHub ${label} search did not include total_count; completeness cannot be confirmed`,
-        );
-    }
-    if (response.incompleteResults !== false) {
-        throw new GitHubPaginationError(
-            `GitHub ${label} search marked results incomplete; narrow or configure the query: ${query}`,
-        );
-    }
-    if (response.searchTotalCount >= 1_000) {
-        throw new GitHubPaginationError(
-            `GitHub ${label} search reached the 1,000-result search limit (${response.searchTotalCount}); narrow or configure the query: ${query}`,
-        );
-    }
-    if (response.searchTotalCount > response.data.length) {
-        throw new GitHubPaginationError(
-            `GitHub ${label} search returned ${response.data.length} of ${response.searchTotalCount} results; narrow or configure the query: ${query}`,
-        );
-    }
-    return { items: response.data, totalCount: response.searchTotalCount };
 }
 
 async function listOwnerRepositories(
