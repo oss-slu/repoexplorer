@@ -6,6 +6,7 @@ import Sustainability from './dash/Sustainability';
 import Organization from './dash/Organization';
 import Impact from './dash/Impact';
 import Browse from './dash/browseRepos';
+import BrowseOrgs from './dash/browseOrgs';
 import aboutText from '../../../docs/about.md?raw';
 import Markdown from 'react-markdown';
 import SidebarFilters from './SidebarFilters';
@@ -308,10 +309,8 @@ function App() {
                                 {orgTab === 'Overview' && (
                                     <Organization filters={orgFilterValues} />
                                 )}
-                                {orgTab !== 'Overview' && (
-                                    <div className="tab-placeholder">
-                                        <p>Organizations {orgTab} Dashboard</p>
-                                    </div>
+                                {orgTab === 'Browse' && (
+                                    <BrowseOrgs filters={orgFilterValues} />
                                 )}
                             </div>
                         </div>
