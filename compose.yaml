@@ -49,6 +49,8 @@ services:
             context: .
             dockerfile: app.Dockerfile
         restart: unless-stopped
+        profiles:
+            - prod
         ports:
             - 8087:80
         volumes:
