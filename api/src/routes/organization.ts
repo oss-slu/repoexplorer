@@ -49,4 +49,9 @@ for (const endpoint of endpoints) {
     });
 }
 
+router.get(`${BASE_ORGANIZATION}/organizations`, (req, res) => {
+    const filtered = filterData(data, req.query, FILTERABLE_ORGS_FIELDS);
+    res.json(filtered);
+});
+
 export default router;
