@@ -57,7 +57,7 @@ describe('GitHubRequestClient', () => {
                         jsonResponse({ ok: true }, 200, {
                             'x-ratelimit-remaining': '0',
                             'x-ratelimit-reset': String(
-                                (Date.now() + 2_000) / 1_000,
+                                Math.ceil((Date.now() + 2_000) / 1_000),
                             ),
                             'x-ratelimit-resource': 'core',
                         }),
@@ -69,10 +69,111 @@ describe('GitHubRequestClient', () => {
                 await jest.advanceTimersByTimeAsync(0);
                 await expect(first).resolves.toMatchObject({ status: 200 });
                 expect(fetchMock).toHaveBeenCalledTimes(1);
-                await jest.advanceTimersByTimeAsync(1_999);
+                await jest.advanceTimersByTimeAsync(2_900);
                 expect(fetchMock).toHaveBeenCalledTimes(1);
-                await jest.advanceTimersByTimeAsync(1);
+                await jest.advanceTimersByTimeAsync(1_200);
                 await expect(second).resolves.toMatchObject({ status: 200 });
+            } finally {
+                jest.useRealTimers();
+            }
+        },
+    );
+
+    test.each([
+        {
+            label: 'numeric Retry-After later than reset',
+            retryAfter: '30',
+            resetAt: '110',
+            expectedDeadline: 130_000,
+        },
+        {
+            label: 'HTTP-date Retry-After later than reset',
+            retryAfter: new Date(130_000).toUTCString(),
+            resetAt: '110',
+            expectedDeadline: 130_000,
+        },
+        {
+            label: 'reset later than Retry-After',
+            retryAfter: '5',
+            resetAt: '110',
+            expectedDeadline: 111_000,
+        },
+        {
+            label: 'malformed Retry-After',
+            retryAfter: 'not-a-time',
+            resetAt: '110',
+            expectedDeadline: 111_000,
+        },
+        {
+            label: 'past HTTP-date Retry-After',
+            retryAfter: new Date(90_000).toUTCString(),
+            resetAt: '110',
+            expectedDeadline: 111_000,
+        },
+        {
+            label: 'missing reset data',
+            retryAfter: '30',
+            resetAt: undefined,
+            expectedDeadline: 160_000,
+        },
+    ])(
+        'schedules successful zero-quota responses using the later deadline: $label',
+        async ({ retryAfter, resetAt, expectedDeadline }) => {
+            jest.useFakeTimers();
+            jest.setSystemTime(100_000);
+            let coreRequests = 0;
+            const waitDeadlines: number[] = [];
+            const fetchMock = createFetchMock(async (input) => {
+                const url = new URL(String(input));
+                if (url.pathname.startsWith('/search/')) {
+                    return jsonResponse({ ok: true });
+                }
+
+                coreRequests += 1;
+                if (coreRequests > 1) return jsonResponse({ ok: true });
+                const headers = new Headers({
+                    'x-ratelimit-remaining': '0',
+                    'x-ratelimit-resource': 'core',
+                    ...(retryAfter === undefined
+                        ? {}
+                        : { 'retry-after': retryAfter }),
+                    ...(resetAt === undefined
+                        ? {}
+                        : { 'x-ratelimit-reset': resetAt }),
+                });
+                return jsonResponse({ ok: true }, 200, headers);
+            });
+            const client = createClient(fetchMock, {
+                now: () => Date.now(),
+                onProgress: (event) => {
+                    if (
+                        event.type === 'rate-limit-wait' &&
+                        event.bucket === 'core'
+                    ) {
+                        waitDeadlines.push(event.until);
+                    }
+                },
+            });
+            const first = client.request('/repos/acme/first');
+            const queuedCore = client.request('/repos/acme/second');
+            const availableSearch = client.request('/search/repositories');
+
+            try {
+                await jest.advanceTimersByTimeAsync(0);
+                await expect(first).resolves.toMatchObject({ status: 200 });
+                await expect(availableSearch).resolves.toMatchObject({
+                    status: 200,
+                });
+                expect(fetchMock).toHaveBeenCalledTimes(2);
+                expect(waitDeadlines).toEqual([expectedDeadline]);
+
+                await jest.advanceTimersByTimeAsync(
+                    expectedDeadline - 100_000 - 1,
+                );
+                expect(fetchMock).toHaveBeenCalledTimes(2);
+                await jest.advanceTimersByTimeAsync(1);
+                await expect(queuedCore).resolves.toMatchObject({ status: 200 });
+                expect(fetchMock).toHaveBeenCalledTimes(3);
             } finally {
                 jest.useRealTimers();
             }
@@ -95,7 +196,7 @@ describe('GitHubRequestClient', () => {
                             {
                                 'x-ratelimit-remaining': '100',
                                 'x-ratelimit-reset': String(
-                                    (Date.now() + 2_000) / 1_000,
+                                    Math.ceil((Date.now() + 2_000) / 1_000),
                                 ),
                             },
                         ),
@@ -297,6 +398,7 @@ describe('GitHubRequestClient', () => {
     });
 
     test('distinguishes a primary rate limit from an ordinary permission error', async () => {
+        jest.useFakeTimers();
         const fetchMock = createFetchMock()
             .mockResolvedValueOnce(
                 jsonResponse({ message: 'API rate limit exceeded' }, 403, {
@@ -309,12 +411,165 @@ describe('GitHubRequestClient', () => {
             .mockResolvedValueOnce(jsonResponse({ ok: true }));
         const client = createClient(fetchMock, { maxRetries: 1 });
 
-        jest.useFakeTimers();
         const pending = client.request('/repos/octo-org/octo-repo');
         try {
             await jest.advanceTimersByTimeAsync(0);
             expect(fetchMock).toHaveBeenCalledTimes(1);
-            await jest.advanceTimersByTimeAsync(3_000);
+            await jest.advanceTimersByTimeAsync(4_100);
+            await expect(pending).resolves.toMatchObject({
+                data: { ok: true },
+            });
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('ordinary permission 403 responses fail promptly without quota waits or retries', async () => {
+        const fetchMock = createFetchMock().mockResolvedValue(
+            jsonResponse(
+                { message: 'Resource not accessible by integration' },
+                403,
+                {
+                    'x-ratelimit-remaining': '100',
+                    'retry-after': '2',
+                },
+            ),
+        );
+        const client = createClient(fetchMock, { maxRetries: 3 });
+
+        await expect(
+            client.request('/repos/octo-org/private'),
+        ).rejects.toMatchObject({
+            classification: 'permission',
+            attemptCount: 1,
+            retryStopReason: 'request is not retryable',
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    test('primary quota recovery does not consume the transient retry budget', async () => {
+        jest.useFakeTimers();
+        const reset = Math.ceil((Date.now() + 2_000) / 1_000);
+        const fetchMock = createFetchMock()
+            .mockResolvedValueOnce(
+                jsonResponse({ message: 'API rate limit exceeded' }, 403, {
+                    'x-ratelimit-remaining': '0',
+                    'x-ratelimit-reset': String(reset),
+                }),
+            )
+            .mockResolvedValueOnce(jsonResponse({ message: 'temporary' }, 502))
+            .mockResolvedValueOnce(jsonResponse({ ok: true }));
+        const client = createClient(fetchMock, {
+            maxRetries: 1,
+            maxRateLimitRetries: 1,
+        });
+        const pending = client.request('/repos/octo-org/repo');
+        try {
+            await jest.advanceTimersByTimeAsync(4_100);
+            await expect(pending).resolves.toMatchObject({
+                data: { ok: true },
+            });
+            expect(fetchMock).toHaveBeenCalledTimes(3);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('bounds repeated primary quota recovery separately and reports the stop reason', async () => {
+        jest.useFakeTimers();
+        const fetchMock = createFetchMock().mockImplementation(async () =>
+            jsonResponse({ message: 'API rate limit exceeded' }, 403, {
+                'x-ratelimit-remaining': '0',
+                'x-ratelimit-reset': String(
+                    Math.ceil((Date.now() + 1_000) / 1_000),
+                ),
+                'x-github-request-id': 'request-2',
+            }),
+        );
+        const client = createClient(fetchMock, {
+            maxRetries: 0,
+            maxRateLimitRetries: 1,
+        });
+        const pending = client.request('/search/repositories');
+        const rejection = expect(pending).rejects.toMatchObject({
+            attemptCount: 2,
+            requestId: 'request-2',
+            retryStopReason: 'rate-limit recovery budget exhausted',
+        });
+        try {
+            await jest.advanceTimersByTimeAsync(3_100);
+            await rejection;
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test.each(['malformed', 'past', 'far future'] as const)(
+        'uses a bounded conservative wait for a %s reset header',
+        async (kind) => {
+            jest.useFakeTimers();
+            const reset =
+                kind === 'past'
+                    ? String(Math.floor(Date.now() / 1_000) - 1)
+                    : kind === 'far future'
+                      ? String(
+                            Math.ceil(
+                                (Date.now() + 365 * 24 * 60 * 60 * 1_000) /
+                                    1_000,
+                            ),
+                        )
+                      : 'not-a-time';
+            const fetchMock = createFetchMock()
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: 'API rate limit exceeded' }, 403, {
+                        'x-ratelimit-remaining': '0',
+                        'x-ratelimit-reset': reset,
+                    }),
+                )
+                .mockResolvedValueOnce(jsonResponse({ ok: true }));
+            const pending = createClient(fetchMock, {
+                maxRetries: 0,
+                maxRateLimitRetries: 1,
+            }).request('/repos/octo-org/repo');
+            try {
+                await jest.advanceTimersByTimeAsync(59_999);
+                expect(fetchMock).toHaveBeenCalledTimes(1);
+                await jest.advanceTimersByTimeAsync(1);
+                await expect(pending).resolves.toMatchObject({
+                    data: { ok: true },
+                });
+                expect(fetchMock).toHaveBeenCalledTimes(2);
+            } finally {
+                jest.useRealTimers();
+            }
+        },
+    );
+
+    test('waits until the later Retry-After or primary reset deadline', async () => {
+        jest.useFakeTimers();
+        const reset = Math.ceil((Date.now() + 10_000) / 1_000);
+        const fetchMock = createFetchMock()
+            .mockResolvedValueOnce(
+                jsonResponse(
+                    { message: 'secondary rate limit exceeded' },
+                    429,
+                    {
+                        'retry-after': '5',
+                        'x-ratelimit-remaining': '0',
+                        'x-ratelimit-reset': String(reset),
+                    },
+                ),
+            )
+            .mockResolvedValueOnce(jsonResponse({ ok: true }));
+        const pending = createClient(fetchMock, {
+            maxRateLimitRetries: 1,
+        }).request('/repos/octo-org/repo');
+        try {
+            await jest.advanceTimersByTimeAsync(5_000);
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+            await jest.advanceTimersByTimeAsync(8_000);
             await expect(pending).resolves.toMatchObject({
                 data: { ok: true },
             });
@@ -360,12 +615,13 @@ describe('GitHubRequestClient', () => {
     test.each(['https://api.github.com', 'https://github.example/api/v3/'])(
         'keeps primary search cooldown separate at %s',
         async (baseUrl) => {
+            jest.useFakeTimers();
             const fetchMock = createFetchMock()
                 .mockResolvedValueOnce(
                     jsonResponse({ message: 'API rate limit exceeded' }, 403, {
                         'x-ratelimit-remaining': '0',
                         'x-ratelimit-reset': String(
-                            (Date.now() + 2_000) / 1_000,
+                            Math.ceil((Date.now() + 2_000) / 1_000),
                         ),
                         'x-ratelimit-resource': 'search',
                     }),
@@ -377,7 +633,6 @@ describe('GitHubRequestClient', () => {
                 baseUrl,
             });
 
-            jest.useFakeTimers();
             const search = client.request('/search/repositories', {
                 query: { q: 'octo' },
             });
@@ -388,7 +643,7 @@ describe('GitHubRequestClient', () => {
                     data: { ok: true },
                 });
                 expect(fetchMock).toHaveBeenCalledTimes(2);
-                await jest.advanceTimersByTimeAsync(2_000);
+                await jest.advanceTimersByTimeAsync(4_100);
                 await expect(search).resolves.toMatchObject({
                     data: { ok: true },
                 });

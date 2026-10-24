@@ -1,3 +1,5 @@
+import type { ScrapingProgressCallback } from '../types/progress';
+
 export type GitHubResponseType = 'json' | 'text';
 
 export type GitHubQueryValue =
@@ -18,11 +20,14 @@ export interface GitHubRequestConfig {
     maxRetries?: number;
     retryBaseDelayMs?: number;
     retryMaxDelayMs?: number;
+    maxRateLimitRetries?: number;
+    rateLimitResetBufferMs?: number;
     concurrency?: number;
     fetch?: typeof globalThis.fetch;
     now?: () => number;
     random?: () => number;
     sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+    onProgress?: ScrapingProgressCallback;
 }
 
 export interface GitHubRequestOptions {
@@ -41,6 +46,28 @@ export interface GitHubResponse<T> {
 }
 
 type RateLimitBucket = 'core' | 'search';
+export type GitHubErrorClassification =
+    | 'primary rate limit'
+    | 'secondary rate limit'
+    | 'authentication'
+    | 'permission'
+    | 'not found'
+    | 'other';
+
+export interface GitHubRateLimitDiagnostics {
+    bucket: RateLimitBucket;
+    classification: 'primary rate limit' | 'secondary rate limit';
+    limit?: number;
+    remaining?: number;
+    resetAt?: number;
+    retryAfterMs?: number;
+}
+
+interface RateLimitDecision {
+    diagnostics: GitHubRateLimitDiagnostics;
+    until: number;
+    delayMs: number;
+}
 
 interface QueuedRequest {
     bucket: RateLimitBucket;
@@ -51,10 +78,16 @@ interface QueuedRequest {
     onAbort?: () => void;
 }
 
+interface GitHubRequestQueueState {
+    activeRequests: number;
+    queuedRequests: number;
+    waits: Partial<Record<RateLimitBucket, number>>;
+}
+
 interface AttemptResult {
     response?: GitHubResponse<unknown>;
     error?: GitHubRequestError;
-    rateLimitDelayMs?: number;
+    rateLimit?: RateLimitDecision;
 }
 
 class TransientAttemptError extends Error {
@@ -70,29 +103,52 @@ class TransientAttemptError extends Error {
 }
 
 export class GitHubRequestError extends Error {
+    readonly method = 'GET';
+    readonly requestId?: string;
+    readonly classification: GitHubErrorClassification;
+    readonly rateLimit?: GitHubRateLimitDiagnostics;
+    attemptCount: number;
+    retryStopReason?: string;
+
     constructor(
         message: string,
         readonly status: number,
         readonly data: unknown,
         readonly headers: Headers,
         readonly url: string,
+        details: {
+            attemptCount?: number;
+            requestId?: string;
+            classification?: GitHubErrorClassification;
+            rateLimit?: GitHubRateLimitDiagnostics;
+            retryStopReason?: string;
+        } = {},
     ) {
         super(message);
         this.name = 'GitHubRequestError';
+        this.attemptCount = details.attemptCount ?? 1;
+        this.requestId = details.requestId;
+        this.classification = details.classification ?? 'other';
+        this.rateLimit = details.rateLimit;
+        this.retryStopReason = details.retryStopReason;
     }
 }
 
 export class GitHubNetworkError extends Error {
+    readonly retryStopReason: string;
+
     constructor(
         readonly url: string,
         readonly attempts: number,
         options?: ErrorOptions,
+        retryStopReason = 'transient retry budget exhausted',
     ) {
         super(
             `GitHub request to ${url} failed after ${attempts} attempts`,
             options,
         );
         this.name = 'GitHubNetworkError';
+        this.retryStopReason = retryStopReason;
     }
 }
 
@@ -114,6 +170,7 @@ export class GitHubResponseParseError extends Error {
         readonly status: number,
         readonly url: string,
         options?: ErrorOptions,
+        readonly attemptCount = 1,
     ) {
         super(
             `GitHub returned invalid JSON for ${url} (status ${status})`,
@@ -130,6 +187,11 @@ const DEFAULT_RETRY_BASE_DELAY_MS = 250;
 const DEFAULT_RETRY_MAX_DELAY_MS = 8_000;
 const DEFAULT_CONCURRENCY = 1;
 const RATE_LIMIT_FALLBACK_DELAY_MS = 60_000;
+const MAX_SECONDARY_RATE_LIMIT_DELAY_MS = 15 * 60_000;
+const DEFAULT_MAX_RATE_LIMIT_RETRIES = 4;
+const MAX_RATE_LIMIT_RESET_HORIZON_MS = 24 * 60 * 60 * 1_000;
+const MAX_TIMER_DELAY_MS = 2_147_000_000;
+const DEFAULT_RATE_LIMIT_RESET_BUFFER_MS = 1_000;
 const RETRYABLE_STATUSES = new Set([409, 412, 502, 503, 504]);
 
 class GitHubRequestQueue {
@@ -141,6 +203,7 @@ class GitHubRequestQueue {
     constructor(
         private readonly concurrency: number,
         private readonly now: () => number,
+        private readonly onChange?: (state: GitHubRequestQueueState) => void,
     ) {}
 
     dispatch<T>(
@@ -183,12 +246,11 @@ class GitHubRequestQueue {
         });
     }
 
-    pause(bucket: RateLimitBucket | 'all', delayMs: number): void {
-        if (delayMs <= 0) {
+    pause(bucket: RateLimitBucket | 'all', until: number): void {
+        if (until <= this.now()) {
             return;
         }
 
-        const until = this.now() + delayMs;
         const buckets: RateLimitBucket[] =
             bucket === 'all' ? ['core', 'search'] : [bucket];
         for (const target of buckets) {
@@ -245,12 +307,32 @@ class GitHubRequestQueue {
         }, Number.POSITIVE_INFINITY);
 
         if (Number.isFinite(nextCooldown)) {
-            const delay = Math.max(0, nextCooldown - this.now());
+            // Node clamps oversized timeout delays to 1ms. Chunk long quota
+            // waits so malformed or far-future headers cannot create a hot loop.
+            const delay = Math.min(
+                MAX_TIMER_DELAY_MS,
+                Math.max(1, nextCooldown - this.now()),
+            );
             this.cooldownTimer = setTimeout(() => {
                 this.cooldownTimer = undefined;
                 this.drain();
             }, delay);
         }
+        this.onChange?.(this.getState());
+    }
+
+    private getState(): GitHubRequestQueueState {
+        const now = this.now();
+        const waits: Partial<Record<RateLimitBucket, number>> = {};
+        for (const bucket of ['core', 'search'] as const) {
+            const until = this.cooldownUntil.get(bucket) ?? 0;
+            if (until > now) waits[bucket] = until;
+        }
+        return {
+            activeRequests: this.active,
+            queuedRequests: this.pending.length,
+            waits,
+        };
     }
 
     private removeAbortListener(request: QueuedRequest): void {
@@ -266,6 +348,8 @@ export class GitHubRequestClient {
     private readonly defaultHeaders: Headers;
     private readonly timeoutMs: number;
     private readonly maxRetries: number;
+    private readonly maxRateLimitRetries: number;
+    private readonly rateLimitResetBufferMs: number;
     private readonly retryBaseDelayMs: number;
     private readonly retryMaxDelayMs: number;
     private readonly fetchImplementation: typeof globalThis.fetch;
@@ -276,6 +360,9 @@ export class GitHubRequestClient {
         signal?: AbortSignal,
     ) => Promise<void>;
     private readonly queue: GitHubRequestQueue;
+    private readonly onProgress?: ScrapingProgressCallback;
+    private readonly startedAt: number;
+    private runSignal?: AbortSignal;
 
     constructor(config: GitHubRequestConfig = {}) {
         this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
@@ -286,6 +373,14 @@ export class GitHubRequestClient {
         this.maxRetries = validateNonNegativeInteger(
             config.maxRetries ?? DEFAULT_MAX_RETRIES,
             'maxRetries',
+        );
+        this.maxRateLimitRetries = validateNonNegativeInteger(
+            config.maxRateLimitRetries ?? DEFAULT_MAX_RATE_LIMIT_RETRIES,
+            'maxRateLimitRetries',
+        );
+        this.rateLimitResetBufferMs = validateNonNegativeInteger(
+            config.rateLimitResetBufferMs ?? DEFAULT_RATE_LIMIT_RESET_BUFFER_MS,
+            'rateLimitResetBufferMs',
         );
         this.retryBaseDelayMs = validateNonNegativeInteger(
             config.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS,
@@ -303,7 +398,15 @@ export class GitHubRequestClient {
         this.now = config.now ?? Date.now;
         this.random = config.random ?? Math.random;
         this.sleep = config.sleep ?? abortableSleep;
-        this.queue = new GitHubRequestQueue(concurrency, this.now);
+        this.onProgress = config.onProgress;
+        this.startedAt = this.now();
+        this.queue = new GitHubRequestQueue(concurrency, this.now, (state) =>
+            this.onProgress?.({
+                type: 'request-queue',
+                ...state,
+                elapsedMs: Math.max(0, this.now() - this.startedAt),
+            }),
+        );
 
         this.defaultHeaders = new Headers({
             Accept: 'application/vnd.github+json',
@@ -342,27 +445,29 @@ export class GitHubRequestClient {
             'timeoutMs',
         );
         const responseType = options.responseType ?? 'json';
-        let lastTransient: TransientAttemptError | undefined;
+        const signal = options.signal ?? this.runSignal;
+        let attempts = 0;
+        let transientRetries = 0;
+        let rateLimitRetries = 0;
 
-        for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
-            if (options.signal?.aborted) {
-                throw createAbortError(options.signal);
+        while (true) {
+            if (signal?.aborted) {
+                throw createAbortError(signal);
             }
 
             try {
-                const result = await this.queue.dispatch(
-                    bucket,
-                    options.signal,
-                    () =>
-                        this.executeAttempt(
-                            url,
-                            requestHeaders,
-                            responseType,
-                            timeoutMs,
-                            options.signal,
-                            bucket,
-                            attempt,
-                        ),
+                attempts += 1;
+                const result = await this.queue.dispatch(bucket, signal, () =>
+                    this.executeAttempt(
+                        url,
+                        requestHeaders,
+                        responseType,
+                        timeoutMs,
+                        signal,
+                        bucket,
+                        attempts,
+                        rateLimitRetries + 1,
+                    ),
                 );
 
                 if (result.response) {
@@ -376,59 +481,57 @@ export class GitHubRequestClient {
                     );
                 }
 
-                const shouldRetry =
-                    result.rateLimitDelayMs !== undefined ||
-                    RETRYABLE_STATUSES.has(error.status);
-                if (!shouldRetry || attempt >= this.maxRetries) {
+                error.attemptCount = attempts;
+                if (result.rateLimit) {
+                    if (rateLimitRetries >= this.maxRateLimitRetries) {
+                        error.retryStopReason =
+                            'rate-limit recovery budget exhausted';
+                        throw error;
+                    }
+                    rateLimitRetries += 1;
+                    continue;
+                }
+
+                if (!RETRYABLE_STATUSES.has(error.status)) {
+                    error.retryStopReason = 'request is not retryable';
                     throw error;
                 }
 
-                if (result.rateLimitDelayMs === undefined) {
-                    await this.sleep(this.retryDelay(attempt), options.signal);
+                if (transientRetries >= this.maxRetries) {
+                    error.retryStopReason = 'transient retry budget exhausted';
+                    throw error;
                 }
+                await this.sleep(this.retryDelay(transientRetries), signal);
+                transientRetries += 1;
             } catch (error) {
-                if (options.signal?.aborted) {
-                    throw createAbortError(options.signal);
+                if (signal?.aborted) {
+                    throw createAbortError(signal);
                 }
 
                 if (!(error instanceof TransientAttemptError)) {
                     throw error;
                 }
 
-                lastTransient = error;
-                if (attempt >= this.maxRetries) {
+                if (transientRetries >= this.maxRetries) {
                     if (error.timedOut) {
                         throw new GitHubTimeoutError(
                             url.toString(),
-                            attempt + 1,
+                            attempts,
                             timeoutMs,
                             {
                                 cause: error,
                             },
                         );
                     }
-                    throw new GitHubNetworkError(url.toString(), attempt + 1, {
+                    throw new GitHubNetworkError(url.toString(), attempts, {
                         cause: error,
                     });
                 }
 
-                await this.sleep(this.retryDelay(attempt), options.signal);
+                await this.sleep(this.retryDelay(transientRetries), signal);
+                transientRetries += 1;
             }
         }
-
-        if (lastTransient?.timedOut) {
-            throw new GitHubTimeoutError(
-                url.toString(),
-                this.maxRetries + 1,
-                timeoutMs,
-                {
-                    cause: lastTransient,
-                },
-            );
-        }
-        throw new GitHubNetworkError(url.toString(), this.maxRetries + 1, {
-            cause: lastTransient,
-        });
     }
 
     private async executeAttempt(
@@ -438,7 +541,8 @@ export class GitHubRequestClient {
         timeoutMs: number,
         callerSignal: AbortSignal | undefined,
         requestBucket: RateLimitBucket,
-        attempt: number,
+        attemptCount: number,
+        rateLimitAttempt: number,
     ): Promise<AttemptResult> {
         const controller = new AbortController();
         let timedOut = false;
@@ -489,6 +593,7 @@ export class GitHubRequestClient {
                     responseType,
                     response.status,
                     url.toString(),
+                    attemptCount,
                 );
             } catch (error) {
                 // HTTP status and headers still govern retries for HTML or text errors.
@@ -509,56 +614,73 @@ export class GitHubRequestClient {
 
             if (response.ok) {
                 if (response.headers.get('x-ratelimit-remaining') === '0') {
-                    this.queue.pause(
-                        getBucketFromResource(response.headers, requestBucket),
-                        parseRateLimitReset(
-                            response.headers.get('x-ratelimit-reset'),
-                            this.now(),
-                        ) ?? RATE_LIMIT_FALLBACK_DELAY_MS,
+                    const responseBucket = getBucketFromResource(
+                        response.headers,
+                        requestBucket,
                     );
+                    const now = this.now();
+                    const until = primaryRateLimitDeadline(
+                        response.headers,
+                        now,
+                        this.rateLimitResetBufferMs,
+                        parseRetryAfter(
+                            response.headers.get('retry-after'),
+                            now,
+                        ),
+                    );
+                    this.emitRateLimitWait(responseBucket, until, 'primary');
+                    this.queue.pause(responseBucket, until);
                 }
                 return { response: githubResponse };
             }
 
+            const rateLimit = getRateLimitDecision(
+                response.status,
+                response.headers,
+                data,
+                this.now(),
+                rateLimitAttempt,
+                requestBucket,
+                this.rateLimitResetBufferMs,
+                this.retryBaseDelayMs,
+                this.retryMaxDelayMs,
+            );
+            const classification =
+                rateLimit?.diagnostics.classification ??
+                classifyHttpError(response.status, response.headers, data);
             const error = new GitHubRequestError(
                 describeHttpError(response.status, data),
                 response.status,
                 data,
                 response.headers,
                 url.toString(),
-            );
-            const rateLimitDelayMs = getRateLimitDelay(
-                response.status,
-                response.headers,
-                data,
-                this.now(),
-                attempt,
+                {
+                    attemptCount,
+                    requestId:
+                        response.headers.get('x-github-request-id') ??
+                        undefined,
+                    classification,
+                    rateLimit: rateLimit?.diagnostics,
+                },
             );
 
-            if (rateLimitDelayMs !== undefined) {
-                const responseBucket = getBucketFromResource(
-                    response.headers,
-                    requestBucket,
+            if (rateLimit) {
+                const pauseBucket =
+                    classification === 'primary rate limit'
+                        ? rateLimit.diagnostics.bucket
+                        : 'all';
+                this.emitRateLimitWait(
+                    pauseBucket,
+                    rateLimit.until,
+                    rateLimit.diagnostics.classification ===
+                        'primary rate limit'
+                        ? 'primary'
+                        : 'secondary',
                 );
-                const message = getErrorMessage(data);
-                const primaryLimit =
-                    !message.includes('secondary rate limit') &&
-                    !message.includes('abuse detection') &&
-                    (response.headers.get('x-ratelimit-remaining') === '0' ||
-                        message.includes('api rate limit exceeded'));
-                const delayMs = Math.max(
-                    rateLimitDelayMs,
-                    this.retryDelay(attempt),
-                );
-                // Primary quotas are per resource; secondary limits pause the entire client.
-                if (primaryLimit) {
-                    this.queue.pause(responseBucket, delayMs);
-                } else {
-                    this.queue.pause('all', delayMs);
-                }
+                this.queue.pause(pauseBucket, rateLimit.until);
             }
 
-            return { error, rateLimitDelayMs };
+            return { error, rateLimit };
         } finally {
             clearTimeout(timeout);
             callerSignal?.removeEventListener('abort', onCallerAbort);
@@ -572,6 +694,25 @@ export class GitHubRequestClient {
         );
         const randomValue = Math.min(0.999_999_999, Math.max(0, this.random()));
         return Math.floor(exponential * randomValue);
+    }
+
+    private emitRateLimitWait(
+        bucket: RateLimitBucket | 'all',
+        until: number,
+        reason: 'primary' | 'secondary',
+    ): void {
+        this.onProgress?.({
+            type: 'rate-limit-wait',
+            bucket,
+            until,
+            reason,
+            elapsedMs: Math.max(0, this.now() - this.startedAt),
+        });
+    }
+
+    /** Set the active scrape's signal; scrapes sharing this client run serially. */
+    setRunSignal(signal?: AbortSignal): void {
+        this.runSignal = signal;
     }
 }
 
@@ -665,6 +806,7 @@ function parseResponseBody(
     responseType: GitHubResponseType,
     status: number,
     url: string,
+    attemptCount: number,
 ): unknown {
     if (responseType === 'text') {
         return rawBody;
@@ -675,7 +817,12 @@ function parseResponseBody(
     try {
         return JSON.parse(rawBody) as unknown;
     } catch (cause) {
-        throw new GitHubResponseParseError(status, url, { cause });
+        throw new GitHubResponseParseError(
+            status,
+            url,
+            { cause },
+            attemptCount,
+        );
     }
 }
 
@@ -689,47 +836,127 @@ function describeHttpError(status: number, data: unknown): string {
     return `GitHub API request failed with status ${status}`;
 }
 
-function getRateLimitDelay(
+function getRateLimitDecision(
     status: number,
     headers: Headers,
     data: unknown,
     now: number,
-    attempt: number,
-): number | undefined {
-    const retryAfter = parseRetryAfter(headers.get('retry-after'), now);
-    const resetDelay = parseRateLimitReset(
+    rateLimitAttempt: number,
+    requestBucket: RateLimitBucket,
+    resetBufferMs: number,
+    retryBaseDelayMs: number,
+    retryMaxDelayMs: number,
+): RateLimitDecision | undefined {
+    if (status !== 403 && status !== 429) return undefined;
+    const remaining = parseSafeInteger(headers.get('x-ratelimit-remaining'));
+    const message = getErrorMessage(data);
+    const resetAt = parseRateLimitResetAt(
         headers.get('x-ratelimit-reset'),
         now,
     );
-    const remaining = headers.get('x-ratelimit-remaining');
-    const message = getErrorMessage(data);
+    const retryAfterMs = parseRetryAfter(headers.get('retry-after'), now);
     const primaryLimit =
-        remaining === '0' || message.includes('api rate limit exceeded');
-    const secondaryLimit =
-        retryAfter !== undefined ||
+        remaining === 0 || message.includes('api rate limit exceeded');
+    const secondaryMessage =
         message.includes('secondary rate limit') ||
         message.includes('abuse detection');
+    const secondaryLimit =
+        secondaryMessage || (status === 429 && retryAfterMs !== undefined);
 
-    if (
-        status !== 429 &&
-        (status !== 403 || (!primaryLimit && !secondaryLimit))
-    ) {
+    let classification: GitHubRateLimitDiagnostics['classification'];
+    if (primaryLimit && !secondaryMessage) {
+        classification = 'primary rate limit';
+    } else if (status === 429 || (status === 403 && secondaryLimit)) {
+        classification = 'secondary rate limit';
+    } else {
         return undefined;
     }
 
-    const primaryOnly =
-        primaryLimit &&
-        !message.includes('secondary rate limit') &&
-        !message.includes('abuse detection');
-    // A primary reset does not describe a secondary cooldown when quota remains.
-    const minimumDelay =
-        retryAfter ??
-        (primaryOnly ? resetDelay : undefined) ??
-        RATE_LIMIT_FALLBACK_DELAY_MS;
-    return Math.max(
-        primaryLimit ? (resetDelay ?? 0) : 0,
-        minimumDelay * (primaryOnly ? 1 : 2 ** Math.min(attempt, 30)),
+    const bucket = getBucketFromResource(headers, requestBucket);
+    const exponential = Math.min(
+        retryMaxDelayMs,
+        retryBaseDelayMs * 2 ** Math.min(rateLimitAttempt - 1, 30),
     );
+    const backoff = Math.max(1_000, exponential);
+    let until: number;
+
+    if (classification === 'primary rate limit') {
+        until = primaryRateLimitDeadline(
+            headers,
+            now,
+            resetBufferMs,
+            retryAfterMs,
+        );
+    } else {
+        const retryDeadline =
+            retryAfterMs === undefined ? 0 : now + retryAfterMs;
+        const resetDeadline =
+            remaining === 0
+                ? primaryRateLimitDeadline(
+                      headers,
+                      now,
+                      resetBufferMs,
+                      retryAfterMs,
+                  )
+                : 0;
+        const secondaryBackoff =
+            retryAfterMs === undefined
+                ? Math.min(
+                      MAX_SECONDARY_RATE_LIMIT_DELAY_MS,
+                      RATE_LIMIT_FALLBACK_DELAY_MS *
+                          2 ** Math.min(rateLimitAttempt - 1, 30),
+                  )
+                : backoff;
+        const fallbackDeadline = now + secondaryBackoff;
+        until = Math.max(retryDeadline, resetDeadline, fallbackDeadline);
+    }
+
+    const delayMs = Math.max(0, until - now);
+    return {
+        diagnostics: {
+            bucket,
+            classification,
+            limit: parseSafeInteger(headers.get('x-ratelimit-limit')),
+            remaining,
+            resetAt,
+            retryAfterMs,
+        },
+        until,
+        delayMs,
+    };
+}
+
+function classifyHttpError(
+    status: number,
+    headers: Headers,
+    data: unknown,
+): GitHubErrorClassification {
+    const message = getErrorMessage(data);
+    const remaining = headers.get('x-ratelimit-remaining');
+    if (status === 401) return 'authentication';
+    const secondaryMessage =
+        message.includes('secondary rate limit') ||
+        message.includes('abuse detection');
+    if (
+        (status === 403 || status === 429) &&
+        !secondaryMessage &&
+        (remaining === '0' || message.includes('api rate limit exceeded'))
+    ) {
+        return 'primary rate limit';
+    }
+    if (
+        status === 429 ||
+        message.includes('secondary rate limit') ||
+        message.includes('abuse detection')
+    ) {
+        return 'secondary rate limit';
+    }
+    if ((status === 403 || status === 429) && remaining === '0') {
+        return 'primary rate limit';
+    }
+    if (status === 403) return 'permission';
+    if (status === 404) return 'not found';
+    return 'other';
 }
 
 function getErrorMessage(data: unknown): string {
@@ -757,22 +984,52 @@ function parseRetryAfter(
         return undefined;
     }
     const seconds = Number(value);
-    if (Number.isFinite(seconds)) {
-        return Math.max(0, seconds * 1_000);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+        const milliseconds = seconds * 1_000;
+        return Number.isFinite(milliseconds) && milliseconds <= 8.64e15
+            ? milliseconds
+            : undefined;
     }
     const date = Date.parse(value);
     return Number.isFinite(date) ? Math.max(0, date - now) : undefined;
 }
 
-function parseRateLimitReset(
+function parseRateLimitResetAt(
     value: string | null,
     now: number,
 ): number | undefined {
     if (value === null || value.trim() === '') {
         return undefined;
     }
-    const resetAt = Number(value) * 1_000;
-    return Number.isFinite(resetAt) ? Math.max(0, resetAt - now) : undefined;
+    const resetAt = Number(value);
+    if (!Number.isSafeInteger(resetAt) || resetAt <= 0) return undefined;
+    return resetAt * 1_000 - now <= MAX_RATE_LIMIT_RESET_HORIZON_MS
+        ? resetAt
+        : undefined;
+}
+
+function primaryRateLimitDeadline(
+    headers: Headers,
+    now: number,
+    resetBufferMs: number,
+    retryAfterMs: number | undefined,
+): number {
+    const resetAt = parseRateLimitResetAt(
+        headers.get('x-ratelimit-reset'),
+        now,
+    );
+    const resetDeadline = resetAt !== undefined && resetAt * 1_000 > now
+        ? resetAt * 1_000 + resetBufferMs
+        : now + RATE_LIMIT_FALLBACK_DELAY_MS;
+    const retryAfterDeadline =
+        retryAfterMs === undefined ? 0 : now + retryAfterMs;
+    return Math.max(resetDeadline, retryAfterDeadline);
+}
+
+function parseSafeInteger(value: string | null): number | undefined {
+    if (value === null || !/^\d+$/.test(value.trim())) return undefined;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
 function createAbortError(signal: AbortSignal): unknown {

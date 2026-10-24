@@ -6,6 +6,8 @@ import {
 
 export interface GitHubPaginatedResponse<T> extends GitHubResponse<T[]> {
     pageCount: number;
+    searchTotalCount?: number;
+    incompleteResults?: boolean;
 }
 
 export class GitHubPaginationError extends Error {
@@ -67,6 +69,8 @@ export async function paginateGitHub<T>(
     let nextPage: string | undefined = endpoint;
     let lastResponse: GitHubResponse<unknown> | undefined;
     let pageCount = 0;
+    let searchTotalCount: number | undefined;
+    let incompleteResults: boolean | undefined;
 
     while (nextPage) {
         if (pageCount >= maxPages) {
@@ -93,7 +97,33 @@ export async function paginateGitHub<T>(
             nextPage,
             pageOptions,
         );
-        items.push(...extractGitHubItems<T>(response.data));
+        if (isSearchEnvelope(response.data)) {
+            const pageTotalCount = response.data.total_count;
+            const pageIncompleteResults = response.data.incomplete_results;
+            if (
+                typeof pageTotalCount === 'number' &&
+                Number.isSafeInteger(pageTotalCount) &&
+                pageTotalCount >= 0
+            ) {
+                if (
+                    searchTotalCount !== undefined &&
+                    pageTotalCount !== searchTotalCount
+                ) {
+                    throw new GitHubPaginationError(
+                        'GitHub search total_count changed during pagination',
+                    );
+                }
+                searchTotalCount ??= pageTotalCount;
+            }
+            if (typeof pageIncompleteResults === 'boolean') {
+                incompleteResults =
+                    incompleteResults === true || pageIncompleteResults;
+            }
+        }
+        // GitHub returns 204 for contributor listings on empty repositories.
+        if (response.status !== 204) {
+            items.push(...extractGitHubItems<T>(response.data));
+        }
         pageCount += 1;
         lastResponse = response;
         nextPage = getNextGitHubPage(response.headers.get('link'));
@@ -122,5 +152,20 @@ export async function paginateGitHub<T>(
         ...lastResponse,
         data: items,
         pageCount,
+        searchTotalCount,
+        incompleteResults,
     };
+}
+
+function isSearchEnvelope(value: unknown): value is {
+    items: unknown[];
+    total_count?: unknown;
+    incomplete_results?: unknown;
+} {
+    return (
+        value !== null &&
+        typeof value === 'object' &&
+        'items' in value &&
+        Array.isArray(value.items)
+    );
 }

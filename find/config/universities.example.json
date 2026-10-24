@@ -1,0 +1,11 @@
+{
+    "repositoryConcurrency": 4,
+    "databaseBatchSize": 100,
+    "universities": [
+        {
+            "key": "Saint Louis University",
+            "fullName": "Saint Louis University",
+            "acronym": "SLU"
+        }
+    ]
+}

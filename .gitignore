@@ -5,5 +5,6 @@ node_modules
 output.json
 *.parquet
 dist
+/find/reports/
 .DS_Store
 *.tsbuildinfo
