@@ -7,6 +7,20 @@ jobs:
         runs-on: ubuntu-latest
         permissions:
             contents: read
+        services:
+            postgres:
+                image: postgres:17-alpine
+                env:
+                    POSTGRES_DB: repoexplorer_find_test
+                    POSTGRES_USER: repoexplorer_test
+                    POSTGRES_PASSWORD: repoexplorer_test
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd "pg_isready -U repoexplorer_test -d repoexplorer_find_test"
+                    --health-interval 5s
+                    --health-timeout 5s
+                    --health-retries 10
         steps:
             - name: checkout
               uses: actions/checkout@v4
@@ -22,6 +36,11 @@ jobs:
               run: cd find && npm ci
 
             - name: run find checks
+              env:
+                  FINDER_TEST_DATABASE_URL: postgresql://repoexplorer_find_app:repoexplorer_find_app@localhost:5432/repoexplorer_find_test
+                  FINDER_TEST_ADMIN_DATABASE_URL: postgresql://repoexplorer_test:repoexplorer_test@localhost:5432/repoexplorer_find_test
+                  FINDER_TEST_APPLICATION_USER: repoexplorer_find_app
+                  FINDER_TEST_APPLICATION_PASSWORD: repoexplorer_find_app
               run: |
                   cd find
                   npm test

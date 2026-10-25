@@ -87,6 +87,10 @@ compose exec --no-TTY db sh -eu -c '
         APPLICATION_USER="$application_user" \
         psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$PGDATABASE" \
             -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/020-schema.sql
+    PGUSER="$POSTGRES_USER" PGPASSWORD="$POSTGRES_PASSWORD" \
+        APPLICATION_USER="$application_user" \
+        psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$PGDATABASE" \
+            -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/repository-scraping.sql
 '
 
 cat >"${TEST_ROOT}/marker.sql" <<EOF

@@ -4,19 +4,23 @@
     "version": "0.0.0",
     "type": "module",
     "scripts": {
-        "build": "tsup src/scraping.ts --format esm --target node20 --out-dir dist",
+        "build": "tsup src/scraping.ts src/cli.ts --format esm --target node20 --out-dir dist",
+        "start": "node dist/cli.js",
         "test": "node --experimental-vm-modules node_modules/.bin/jest",
+        "test:integration": "node scripts/require-integration-db.mjs && node --experimental-vm-modules node_modules/.bin/jest --runInBand --runTestsByPath src/tests/repositoryStore.integration.test.ts",
         "lint": "eslint .",
         "typecheck": "tsc --noEmit",
         "fmt": "prettier --write **/*.{ts,js,json}"
     },
     "dependencies": {
-        "dotenv": "^18.0.2"
+        "dotenv": "^18.0.2",
+        "pg": "^8.23.1"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
         "@types/jest": "^30.0.0",
         "@types/node": "^24.13.3",
+        "@types/pg": "^8.23.1",
         "eslint": "^10.8.0",
         "globals": "^17.7.0",
         "jest": "^30.5.1",
