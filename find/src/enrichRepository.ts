@@ -4,8 +4,14 @@ import { allOrThrow, mapWithConcurrency } from './utils/concurrency';
 import type {
     RepositoryCandidate,
     RepositoryScrapingRecord,
+    SkippedRepository,
     UniversityConfiguration,
 } from './types/scraping';
+import {
+    RepositoryEnrichmentSkipError,
+    RepositoryRecordValidationError,
+} from './utils/scrapingError';
+import { sanitizeGitHubEndpoint } from './utils/scrapingDiagnostics';
 
 type RepositoryPayload = {
     id: number;
@@ -53,6 +59,48 @@ export async function enrichRepository(
     now: () => Date = () => new Date(),
 ): Promise<RepositoryScrapingRecord> {
     const endpoint = repositoryEndpoint(candidate.fullName);
+    try {
+        return await enrichRepositoryRecord(
+            client,
+            candidate,
+            university,
+            now,
+            endpoint,
+        );
+    } catch (error) {
+        const skippedRepository = decideSkippedRepository(
+            error,
+            candidate,
+            university.key,
+            endpoint,
+        );
+        if (skippedRepository) {
+            throw new RepositoryEnrichmentSkipError(skippedRepository, {
+                cause: error,
+            });
+        }
+        if (
+            error instanceof TypeError &&
+            !(error instanceof RepositoryRecordValidationError)
+        ) {
+            throw new RepositoryRecordValidationError(
+                candidate.fullName,
+                inferValidationField(error),
+                `Repository ${candidate.fullName} data failed validation`,
+                { cause: error },
+            );
+        }
+        throw error;
+    }
+}
+
+async function enrichRepositoryRecord(
+    client: GitHubRequestClient,
+    candidate: RepositoryCandidate,
+    university: UniversityConfiguration,
+    now: () => Date,
+    endpoint: string,
+): Promise<RepositoryScrapingRecord> {
     const repository = parseRepositoryPayload(
         await requestJson(client, endpoint),
         candidate,
@@ -96,17 +144,17 @@ export async function enrichRepository(
     return {
         university: university.key,
         id: repository.id,
-        fullName: optionalString(repository.full_name) ?? candidate.fullName,
+        fullName: optionalString(repository.full_name, 'full_name') ?? candidate.fullName,
         owner: repository.owner.login,
         license: normalizeLicense(repository.license),
-        language: optionalString(repository.language),
-        htmlUrl: optionalString(repository.html_url),
-        description: optionalString(repository.description),
+        language: optionalString(repository.language, 'language'),
+        htmlUrl: optionalString(repository.html_url, 'html_url'),
+        description: optionalString(repository.description, 'description'),
         fork: repository.fork ? 1 : 0,
         createdAt: normalizeTimestamp(repository.created_at, 'created_at'),
         updatedAt: normalizeTimestamp(repository.updated_at, 'updated_at'),
         pushedAt: nullableTimestamp(repository.pushed_at, 'pushed_at'),
-        homepage: optionalString(repository.homepage),
+        homepage: optionalString(repository.homepage, 'homepage'),
         size: safeNonNegativeInteger(repository.size, 'size'),
         stargazersCount: safeNonNegativeInteger(
             repository.stargazers_count,
@@ -147,6 +195,114 @@ export async function enrichRepository(
         typePredictionGpt5Mini: null,
         scrapedAt: timestamp.toISOString(),
     };
+}
+
+function decideSkippedRepository(
+    error: unknown,
+    candidate: RepositoryCandidate,
+    university: string,
+    endpoint: string,
+): SkippedRepository | undefined {
+    const requestError = findGitHubRequestError(error);
+    if (!requestError) return undefined;
+
+    let requestPath: string;
+    let repositoryPath: string;
+    try {
+        requestPath = new URL(requestError.url).pathname;
+        repositoryPath = new URL(`https://api.github.com${endpoint}`).pathname;
+    } catch {
+        return undefined;
+    }
+
+    let reasonCode: SkippedRepository['reasonCode'] | undefined;
+    let reason: string | undefined;
+    if (
+        requestError.status === 403 &&
+        isTermsOfServiceBlock(requestError.data) &&
+        (requestPath === repositoryPath ||
+            requestPath.startsWith(`${repositoryPath}/`))
+    ) {
+        reasonCode = 'github_tos_block';
+        reason = 'GitHub blocked repository access for a Terms of Service restriction.';
+    } else if (
+        requestError.status === 404 &&
+        requestPath === repositoryPath
+    ) {
+        reasonCode = 'repository_unavailable_404';
+        reason = 'The repository detail endpoint returned HTTP 404 after discovery.';
+    }
+    if (!reasonCode || !reason) return undefined;
+
+    return {
+        university,
+        repositoryId: candidate.id,
+        repositoryName: candidate.fullName,
+        endpoint: sanitizeGitHubEndpoint(requestError.url),
+        status: requestError.status as 403 | 404,
+        reasonCode,
+        reason,
+    };
+}
+
+function findGitHubRequestError(error: unknown): GitHubRequestError | undefined {
+    const visited = new Set<unknown>();
+    let current: unknown = error;
+    while (current instanceof Error && !visited.has(current)) {
+        if (current instanceof GitHubRequestError) return current;
+        visited.add(current);
+        current = current.cause;
+    }
+    return undefined;
+}
+
+function isTermsOfServiceBlock(value: unknown): boolean {
+    if (
+        value === null ||
+        typeof value !== 'object' ||
+        Array.isArray(value) ||
+        !('block' in value)
+    ) {
+        return false;
+    }
+    const block = value.block;
+    if (block === null || typeof block !== 'object' || Array.isArray(block)) {
+        return false;
+    }
+    return 'reason' in block && block.reason === 'tos';
+}
+
+function inferValidationField(error: TypeError): string {
+    const knownFields = [
+        'stargazers_count',
+        'watchers_count',
+        'forks_count',
+        'open_issues_count',
+        'subscribers_count',
+        'download_count',
+        'contributions',
+        'description',
+        'language',
+        'html_url',
+        'homepage',
+        'spdx_id',
+        'created_at',
+        'updated_at',
+        'pushed_at',
+        'full_name',
+        'issue_template',
+        'id',
+        'owner',
+        'login',
+        'assets',
+        'path',
+        'url',
+        'content',
+    ];
+    const field = knownFields.find((candidate) =>
+        error.message.includes(candidate),
+    );
+    return field ?? 'payload';
 }
 
 async function getReleaseDownloads(
@@ -480,19 +636,39 @@ function parseRepositoryPayload(
     candidate: RepositoryCandidate,
 ): RepositoryPayload {
     const record = requireRecord(value, 'repository details');
-    if (typeof record.id !== 'number' || !Number.isSafeInteger(record.id)) {
+    if (
+        typeof record.id !== 'number' ||
+        !Number.isSafeInteger(record.id) ||
+        record.id <= 0
+    ) {
         throw new TypeError(
             `Repository ${candidate.fullName} has an invalid or unsafe ID`,
         );
     }
     if (record.id !== candidate.id) {
-        throw new Error(
-            `Repository identity changed during discovery: ${candidate.id} now resolves to ${record.id}`,
+        throw new RepositoryRecordValidationError(
+            candidate.fullName,
+            'id',
+            'Repository ID no longer matches the discovered repository',
+        );
+    }
+    if (
+        record.full_name !== undefined &&
+        record.full_name !== null &&
+        (typeof record.full_name !== 'string' ||
+            record.full_name.includes('\u0000') ||
+            !/^[^/]+\/[^/]+$/.test(record.full_name) ||
+            record.full_name.split('/').some((part) => part.trim() === ''))
+    ) {
+        throw new TypeError(
+            `Repository ${candidate.fullName} has an invalid full_name`,
         );
     }
     const owner = requireRecord(record.owner, 'repository owner');
     if (
         typeof owner.login !== 'string' ||
+        owner.login.trim() === '' ||
+        owner.login.includes('\u0000') ||
         (owner.type !== 'Organization' && owner.type !== 'User')
     ) {
         throw new TypeError(
@@ -518,7 +694,11 @@ function parseContentReference(
         return null;
     }
     const record = requireRecord(value, `community file ${field}`);
-    if (typeof record.url !== 'string' || record.url.trim() === '') {
+    if (
+        typeof record.url !== 'string' ||
+        record.url.trim() === '' ||
+        record.url.includes('\u0000')
+    ) {
         throw new TypeError(
             `GitHub community file ${field} has no content URL`,
         );
@@ -528,7 +708,11 @@ function parseContentReference(
 
 function parseContentEntry(value: unknown, index: number): ContentEntry | null {
     const record = requireRecord(value, `content entry ${index}`);
-    if (typeof record.path !== 'string' || record.path.trim() === '') {
+    if (
+        typeof record.path !== 'string' ||
+        record.path.trim() === '' ||
+        record.path.includes('\u0000')
+    ) {
         throw new TypeError(`GitHub content entry ${index} is malformed`);
     }
     if (record.type === 'symlink' || record.type === 'submodule') {
@@ -544,7 +728,14 @@ function parseContentEntry(value: unknown, index: number): ContentEntry | null {
 
 function repositoryEndpoint(fullName: string): string {
     const [owner, repository] = fullName.split('/');
-    if (!owner || !repository || fullName.split('/').length !== 2) {
+    if (
+        !owner ||
+        !repository ||
+        owner.trim() === '' ||
+        repository.trim() === '' ||
+        fullName.includes('\u0000') ||
+        fullName.split('/').length !== 2
+    ) {
         throw new TypeError(`Invalid GitHub repository name: ${fullName}`);
     }
     return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;
@@ -574,6 +765,11 @@ function repositoryPathFromContentsEndpoint(endpoint: string): string {
 }
 
 function apiPathFromUrl(value: string): string {
+    if (value.includes('\u0000')) {
+        throw new TypeError(
+            'GitHub community file has an invalid content URL',
+        );
+    }
     let url: URL;
     try {
         url = new URL(value, 'https://api.github.com');
@@ -599,7 +795,7 @@ function normalizeLicense(value: unknown): string | null {
         return null;
     }
     const license = requireRecord(value, 'repository license');
-    const spdxId = optionalString(license.spdx_id);
+    const spdxId = optionalString(license.spdx_id, 'spdx_id');
     if (!spdxId || spdxId.toUpperCase() === 'NOASSERTION') {
         return 'other';
     }
@@ -624,12 +820,12 @@ function nullableTimestamp(value: unknown, name: string): string | null {
     return normalizeTimestamp(value, name);
 }
 
-function optionalString(value: unknown): string | null {
+function optionalString(value: unknown, field: string): string | null {
     if (value === null || value === undefined) {
         return null;
     }
     if (typeof value !== 'string') {
-        throw new TypeError('GitHub text field was not a string or null');
+        throw new TypeError(`GitHub ${field} field was not a string or null`);
     }
     return value;
 }

@@ -7,13 +7,15 @@ import { RepositoryStore } from './db/repositoryStore';
 import { runScraping } from './runner';
 import { GitHubRequestClient } from './utils/githubRequest';
 import { formatScrapingError } from './utils/formatScrapingError';
+import { ScrapingDatabasePreflightError } from './utils/scrapingError';
+import { sanitizeDiagnosticText } from './utils/scrapingDiagnostics';
 import { CliProgressRenderer } from './utils/progressRenderer';
 import {
     createScrapingReport,
     writeScrapingReport,
 } from './utils/scrapingReport';
 import type {
-    OwnerListingPolicy,
+    ScrapingPolicy,
     ScrapeUniversityFailure,
     ScrapingRunResult,
 } from './types/scraping';
@@ -23,14 +25,14 @@ const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 export interface CliOptions {
     configPath: string;
     verbose: boolean;
-    policy: OwnerListingPolicy;
+    policy: ScrapingPolicy;
 }
 
 export function parseCliOptions(arguments_: readonly string[]): CliOptions {
     let configPath =
         process.env.UNIVERSITIES_CONFIG ?? 'config/universities.json';
     let verbose = false;
-    let policy: OwnerListingPolicy = 'best-effort';
+    let policy: ScrapingPolicy = 'best-effort';
     for (let index = 0; index < arguments_.length; index += 1) {
         const argument = arguments_[index];
         if (argument === '--config') {
@@ -57,12 +59,21 @@ export function parseCliArguments(arguments_: readonly string[]): string {
     return parseCliOptions(arguments_).configPath;
 }
 
+export async function withDatabasePreflight<T>(
+    preflight: () => Promise<void>,
+    scrape: () => Promise<T>,
+): Promise<T> {
+    await preflight();
+    return scrape();
+}
+
 export async function runCli(arguments_: readonly string[]): Promise<number> {
     const { configPath, verbose, policy } = parseCliOptions(arguments_);
     const configuration = await loadScrapingConfiguration(configPath);
     // Validate all database settings before constructing the client or making requests.
     getDatabasePoolConfig();
     const pool = createDatabasePool();
+    const store = new RepositoryStore(pool, configuration.databaseBatchSize);
     const renderer = verbose
         ? new CliProgressRenderer({ stdout: process.stdout })
         : undefined;
@@ -87,18 +98,26 @@ export async function runCli(arguments_: readonly string[]): Promise<number> {
     const failuresReported = new Set<string>();
     const startedAt = new Date();
     try {
-        const result = await runScraping(configuration, {
-            client,
-            store: new RepositoryStore(pool, configuration.databaseBatchSize),
-            policy,
-            signal: controller.signal,
-            onProgress: renderer?.onProgress,
-            onFatalError: (university, error) => {
-                failuresReported.add(university);
-                renderer?.clearForOutput();
-                writeImmediateCliFailure(process.stderr, university, error);
-            },
-        });
+        const result = await withDatabasePreflight(
+            () => store.preflight(),
+            () =>
+                runScraping(configuration, {
+                    client,
+                    store,
+                    policy,
+                    signal: controller.signal,
+                    onProgress: renderer?.onProgress,
+                    onFatalError: (university, error) => {
+                        failuresReported.add(university);
+                        renderer?.clearForOutput();
+                        writeImmediateCliFailure(
+                            process.stderr,
+                            university,
+                            error,
+                        );
+                    },
+                }),
+        );
         renderer?.finish();
 
         const finishedAt = new Date();
@@ -126,10 +145,10 @@ export async function runCli(arguments_: readonly string[]): Promise<number> {
         for (const university of result.results) {
             const coverage =
                 university.status === 'partial'
-                    ? `PARTIAL; ${university.skippedOwners.length} owners skipped; `
+                    ? `PARTIAL; ${university.skippedOwners.length} owners skipped, ${university.skippedRepositories.length} repositories skipped, ${university.warnings.length} text warnings; `
                     : '';
             process.stdout.write(
-                `${university.university}: ${coverage}${university.discovered} unique repositories; ${university.committed} committed\n`,
+                `${sanitizeDiagnosticText(university.university)}: ${coverage}${university.discovered} unique repositories; ${university.committed} committed\n`,
             );
         }
         for (const failure of result.failures) {
@@ -168,7 +187,13 @@ export function formatCliFailure(failure: ScrapeUniversityFailure): string {
     const skipped = failure.skippedOwners.length
         ? `; ${failure.skippedOwners.length} owners skipped before failure`
         : '';
-    return `${failure.university}: FAILED: ${discovered}${skipped}: ${formatScrapingError(failure.error)}`;
+    const skippedRepositories = failure.skippedRepositories.length
+        ? `; ${failure.skippedRepositories.length} repositories skipped before failure`
+        : '';
+    const warnings = failure.warnings.length
+        ? `; ${failure.warnings.length} text warnings before failure`
+        : '';
+    return `${sanitizeDiagnosticText(failure.university)}: FAILED: ${discovered}${skipped}${skippedRepositories}${warnings}: ${formatScrapingError(failure.error)}`;
 }
 
 export function getCliExitCode(
@@ -186,12 +211,21 @@ export function getCliExitCode(
 export function formatCliSummary(
     result: ScrapingRunResult,
     universityCount: number,
-    policy: OwnerListingPolicy,
+    policy: ScrapingPolicy,
     reportPath: string | undefined,
     interrupted: boolean,
 ): string {
     const skippedOwners = [...result.results, ...result.failures].reduce(
         (total, university) => total + university.skippedOwners.length,
+        0,
+    );
+    const skippedRepositories = [...result.results, ...result.failures].reduce(
+        (total, university) =>
+            total + university.skippedRepositories.length,
+        0,
+    );
+    const warnings = [...result.results, ...result.failures].reduce(
+        (total, university) => total + university.warnings.length,
         0,
     );
     const label = interrupted
@@ -207,7 +241,7 @@ export function formatCliSummary(
               : result.partial > 0
                 ? 'PARTIAL COMPLETION'
                 : 'COMPLETED';
-    return `${label} in ${formatDuration(result.elapsedMs)}. Universities processed: ${result.universitiesProcessed}/${universityCount}; complete: ${result.results.length - result.partial}; partial: ${result.partial}; failed: ${result.failed}; skipped owners: ${skippedOwners}; repository associations committed: ${result.committed}; policy: ${policy}; report: ${reportPath ?? 'UNAVAILABLE (report write failed)'}\n`;
+    return `${label} in ${formatDuration(result.elapsedMs)}. Universities processed: ${result.universitiesProcessed}/${universityCount}; complete: ${result.results.length - result.partial}; partial: ${result.partial}; failed: ${result.failed}; skipped owners: ${skippedOwners}; skipped repositories: ${skippedRepositories}; text warnings: ${warnings}; repository associations committed: ${result.committed}; policy: ${policy}; report: ${reportPath ?? 'UNAVAILABLE (report write failed)'}\n`;
 }
 
 export function writeImmediateCliFailure(
@@ -216,7 +250,7 @@ export function writeImmediateCliFailure(
     error: Error,
 ): void {
     stderr.write(
-        `${university}: FAILED; 0 committed; cleaning up: ${formatScrapingError(error)}\n`,
+        `${sanitizeDiagnosticText(university)}: FAILED; 0 committed; cleaning up: ${formatScrapingError(error)}\n`,
     );
 }
 
@@ -265,12 +299,12 @@ if (isDirectExecution(import.meta.url)) {
         .catch((error: unknown) => {
             if (error instanceof CliHelpRequested) {
                 process.stdout.write(
-                    'Usage: npm start -- [--config <path>] [--strict] [--verbose|-v]\nOwner-listing 404s are skipped by default; --strict restores all-or-nothing discovery. Configuration contains universities; PG* variables configure PostgreSQL and GITHUB_TOKEN is optional.\nExit codes: 0 complete, 2 partial coverage, 1 fatal failure; SIGINT/SIGTERM retain 130/143.\n',
+                    'Usage: npm start -- [--config <path>] [--strict] [--verbose|-v]\nBest-effort skips documented unavailable owners and repository-level access failures; --strict fails instead of skipping owners or repository-level failures. Descriptive NUL text is normalized and reported under both policies. Configuration contains universities; PG* variables configure PostgreSQL and GITHUB_TOKEN is optional.\nExit codes: 0 complete, 2 partial coverage, 1 fatal failure; SIGINT/SIGTERM retain 130/143.\n',
                 );
                 return;
             }
             process.stderr.write(
-                `${error instanceof Error ? error.message : String(error)}\n`,
+                `${error instanceof ScrapingDatabasePreflightError ? formatScrapingError(error) : error instanceof Error ? error.message : String(error)}\n`,
             );
             process.exitCode = 1;
         });

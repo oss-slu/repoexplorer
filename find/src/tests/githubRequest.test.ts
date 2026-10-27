@@ -268,6 +268,36 @@ describe('GitHubRequestClient', () => {
         expect(result.headers.get('x-github-request-id')).toBe('request-1');
     });
 
+    test('documents default UTF-8 decoding for bytes sent to raw-text endpoints', async () => {
+        const binaryResponse = new Response(
+            Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x00]),
+            { headers: { 'content-type': 'application/octet-stream' } },
+        );
+        const utf16Response = new Response(
+            Uint8Array.from([0x41, 0x00, 0x42, 0x00]),
+            { headers: { 'content-type': 'text/plain; charset=utf-16le' } },
+        );
+        const malformedUtf8Response = new Response(
+            Uint8Array.from([0xc3, 0x28]),
+            { headers: { 'content-type': 'text/plain; charset=utf-8' } },
+        );
+        const fetchMock = createFetchMock()
+            .mockResolvedValueOnce(binaryResponse)
+            .mockResolvedValueOnce(utf16Response)
+            .mockResolvedValueOnce(malformedUtf8Response);
+        const client = createClient(fetchMock);
+
+        await expect(
+            client.request('/repos/o/r/binary.md', { responseType: 'text' }),
+        ).resolves.toMatchObject({ data: '\uFFFDPNG\u0000' });
+        await expect(
+            client.request('/repos/o/r/utf16.md', { responseType: 'text' }),
+        ).resolves.toMatchObject({ data: 'A\u0000B\u0000' });
+        await expect(
+            client.request('/repos/o/r/malformed.md', { responseType: 'text' }),
+        ).resolves.toMatchObject({ data: '\uFFFD(' });
+    });
+
     test('returns repository content as text when requested', async () => {
         const fetchMock = createFetchMock().mockResolvedValue(
             new Response('# Hello\n', { status: 200 }),
@@ -384,6 +414,25 @@ describe('GitHubRequestClient', () => {
             expect(fetchMock).toHaveBeenCalledTimes(1);
         },
     );
+
+    test.each([
+        { name: 'ToS restriction', block: { reason: 'tos' } },
+        { name: 'SSO restriction', block: { reason: 'sso' } },
+    ])('preserves structured HTTP errors for raw-text responses: $name', async (body) => {
+        const fetchMock = createFetchMock().mockResolvedValue(
+            jsonResponse({ message: 'Repository access blocked', ...body }, 403),
+        );
+        const client = createClient(fetchMock);
+        await expect(
+            client.request('/repos/octo-org/octo-repo/readme', {
+                responseType: 'text',
+            }),
+        ).rejects.toMatchObject({
+            status: 403,
+            classification: 'permission',
+            data: { block: body.block },
+        });
+    });
 
     test('retries transient network failures and reports exhausted attempts', async () => {
         const fetchMock = createFetchMock().mockRejectedValue(

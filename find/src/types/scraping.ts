@@ -17,7 +17,10 @@ export type ScrapingConfiguration = {
     databaseBatchSize: number;
 };
 
-export type OwnerListingPolicy = 'best-effort' | 'strict';
+export type ScrapingPolicy = 'best-effort' | 'strict';
+
+/** Kept as an alias for callers that used the original owner-only policy name. */
+export type OwnerListingPolicy = ScrapingPolicy;
 
 export type SkippedOwner = {
     university: string;
@@ -26,6 +29,25 @@ export type SkippedOwner = {
     endpoint: string;
     status: 404;
     reason: string;
+};
+
+export type SkippedRepository = {
+    university: string;
+    repositoryId: number;
+    repositoryName: string;
+    endpoint: string;
+    status: 403 | 404;
+    reasonCode: 'github_tos_block' | 'repository_unavailable_404';
+    reason: string;
+};
+
+export type ScrapingWarning = {
+    university: string;
+    repositoryId: number;
+    repositoryName: string;
+    field: string;
+    replacementCount: number;
+    code: 'nul_replaced';
 };
 
 export type RepositoryCandidate = {
@@ -80,6 +102,8 @@ export type ScrapeUniversityResult = {
     discovered: number;
     committed: number;
     skippedOwners: SkippedOwner[];
+    skippedRepositories: SkippedRepository[];
+    warnings: ScrapingWarning[];
 };
 
 export type ScrapeUniversityFailure = {
@@ -88,6 +112,8 @@ export type ScrapeUniversityFailure = {
     discovered?: number;
     error: Error;
     skippedOwners: SkippedOwner[];
+    skippedRepositories: SkippedRepository[];
+    warnings: ScrapingWarning[];
 };
 
 export type ScrapeUniversityOutcome =

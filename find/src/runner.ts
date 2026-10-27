@@ -2,7 +2,11 @@ import { discoverRepositories } from './discoverRepositories';
 import { enrichRepository } from './enrichRepository';
 import { mapWithConcurrency } from './utils/concurrency';
 import { GitHubRequestClient } from './utils/githubRequest';
-import { withScrapingContext } from './utils/scrapingError';
+import {
+    RepositoryEnrichmentSkipError,
+    withScrapingContext,
+} from './utils/scrapingError';
+import { normalizeRepositoryText } from './utils/normalizeRepositoryText';
 import type {
     ScrapingProgressCallback,
     ScrapingProgressEvent,
@@ -10,13 +14,15 @@ import type {
 } from './types/progress';
 import type {
     RepositoryScrapingRecord,
-    OwnerListingPolicy,
+    ScrapingPolicy,
     ScrapingConfiguration,
     ScrapeUniversityOutcome,
     ScrapeUniversityFailure,
     ScrapeUniversityResult,
     ScrapingRunResult,
     SkippedOwner,
+    SkippedRepository,
+    ScrapingWarning,
     UniversityConfiguration,
 } from './types/scraping';
 
@@ -31,7 +37,7 @@ export type ScrapingRunnerDependencies = {
     client: GitHubRequestClient;
     store: RepositoryStorePort;
     now?: () => Date;
-    policy?: OwnerListingPolicy;
+    policy?: ScrapingPolicy;
     signal?: AbortSignal;
     onProgress?: ScrapingProgressCallback;
     onFatalError?: (university: string, error: Error) => void;
@@ -50,6 +56,8 @@ type RunnerProgressEvent =
           university: string;
           completed: number;
           total: number;
+          skipped?: number;
+          warnings?: number;
           label?: string;
       };
 
@@ -93,6 +101,8 @@ export async function runScraping(
                     discovered: error.discovered,
                     error: error.scrapeError,
                     skippedOwners: error.skippedOwners,
+                    skippedRepositories: error.skippedRepositories,
+                    warnings: error.warnings,
                 };
                 failures.push(failure);
                 outcomes.push(failure);
@@ -102,6 +112,8 @@ export async function runScraping(
                     university: university.key,
                     error: asError(error),
                     skippedOwners: [],
+                    skippedRepositories: [],
+                    warnings: [],
                 };
                 failures.push(failure);
                 outcomes.push(failure);
@@ -140,7 +152,7 @@ async function scrapeUniversity(
     university: UniversityConfiguration,
     repositoryConcurrency: number,
     now: (() => Date) | undefined,
-    policy: OwnerListingPolicy,
+    policy: ScrapingPolicy,
     parentSignal: AbortSignal | undefined,
     emit: (event: RunnerProgressEvent) => void,
     elapsedMs: () => number,
@@ -149,6 +161,8 @@ async function scrapeUniversity(
 ): Promise<ScrapeUniversityResult> {
     let discovered: number | undefined;
     let skippedOwners: SkippedOwner[] = [];
+    const skippedRepositories: SkippedRepository[] = [];
+    const warnings: ScrapingWarning[] = [];
     let phase: ScrapingPhase = 'search';
     let fatalReported = false;
     const reportFatal = (error: unknown) => {
@@ -202,33 +216,74 @@ async function scrapeUniversity(
             university: university.key,
             completed,
             total: discovered,
+            skipped: 0,
         });
-        const records = await mapWithConcurrency(
+        let skippedRepositoryCount = 0;
+        const enrichmentResults = await mapWithConcurrency(
             discovery.candidates,
             repositoryConcurrency,
             async (candidate) => {
-                const record = await enrichRepository(
-                    client,
-                    candidate,
-                    university,
-                    now,
-                ).catch((error: unknown) => {
+                try {
+                    const record = await enrichRepository(
+                        client,
+                        candidate,
+                        university,
+                        now,
+                    );
+                    const normalized = normalizeRepositoryText([record]);
+                    warnings.push(...normalized.warnings);
+                    for (const warning of normalized.warnings) {
+                        onProgress?.({
+                            type: 'warning',
+                            university: warning.university,
+                            repository: warning.repositoryName,
+                            field: warning.field,
+                            replacementCount: warning.replacementCount,
+                            code: warning.code,
+                            elapsedMs: elapsedMs(),
+                        });
+                    }
+                    completed += 1;
+                    emit({
+                        type: 'progress',
+                        phase,
+                        university: university.key,
+                        completed,
+                        total: discovered ?? 0,
+                        skipped: skippedRepositoryCount,
+                        warnings: warnings.length,
+                        label: candidate.fullName,
+                    });
+                    return normalized.records[0];
+                } catch (error) {
+                    if (error instanceof RepositoryEnrichmentSkipError) {
+                        if (policy === 'strict') {
+                            throw withScrapingContext(error, {
+                                phase: 'enrichment',
+                                university: university.key,
+                                repository: candidate.fullName,
+                            });
+                        }
+                        skippedRepositories.push(error.skippedRepository);
+                        skippedRepositoryCount += 1;
+                        completed += 1;
+                        emit({
+                            type: 'progress',
+                            phase,
+                            university: university.key,
+                            completed,
+                            total: discovered ?? 0,
+                            skipped: skippedRepositoryCount,
+                            label: `${candidate.fullName} (skipped)`,
+                        });
+                        return undefined;
+                    }
                     throw withScrapingContext(error, {
                         phase: 'enrichment',
                         university: university.key,
                         repository: candidate.fullName,
                     });
-                });
-                completed += 1;
-                emit({
-                    type: 'progress',
-                    phase,
-                    university: university.key,
-                    completed,
-                    total: discovered ?? 0,
-                    label: candidate.fullName,
-                });
-                return record;
+                }
             },
             (error) => {
                 reportFatal(error);
@@ -236,15 +291,39 @@ async function scrapeUniversity(
             },
         );
 
+        const records = enrichmentResults.filter(
+            (record): record is RepositoryScrapingRecord =>
+                record !== undefined,
+        );
+        emit({
+            type: 'progress',
+            phase,
+            university: university.key,
+            completed,
+            total: discovered,
+            skipped: skippedRepositoryCount,
+            warnings: warnings.length,
+        });
+
         phase = 'database write';
         emit({ type: 'phase', phase, university: university.key });
-        const committed = await store.upsertUniversity(university.key, records);
+        const committed = await store.upsertUniversity(
+            university.key,
+            records,
+        );
         return {
-            status: skippedOwners.length > 0 ? 'partial' : 'complete',
+            status:
+                skippedOwners.length > 0 ||
+                skippedRepositories.length > 0 ||
+                warnings.length > 0
+                    ? 'partial'
+                    : 'complete',
             university: university.key,
             discovered,
             committed,
             skippedOwners,
+            skippedRepositories,
+            warnings,
         };
     } catch (error) {
         if (!controller.signal.aborted) controller.abort(error);
@@ -257,6 +336,8 @@ async function scrapeUniversity(
             discovered,
             contextualError,
             skippedOwners,
+            skippedRepositories,
+            warnings,
         );
     } finally {
         parentSignal?.removeEventListener('abort', abortFromParent);
@@ -269,6 +350,8 @@ class UniversityScrapeError extends Error {
         readonly discovered: number | undefined,
         readonly scrapeError: Error,
         readonly skippedOwners: SkippedOwner[],
+        readonly skippedRepositories: SkippedRepository[],
+        readonly warnings: ScrapingWarning[],
     ) {
         super(scrapeError.message, { cause: scrapeError });
         this.name = 'UniversityScrapeError';

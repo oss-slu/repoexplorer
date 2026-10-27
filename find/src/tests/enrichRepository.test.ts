@@ -51,13 +51,15 @@ function pathFromReference(field: string): string {
 function commonHandler(
     options: {
         repository?: Record<string, unknown>;
+        repositoryStatus?: number;
         readmeStatus?: number;
-        readmeError?: 'auth';
+        readmeError?: 'auth' | 'permission' | 'sso' | 'tos';
         releases?: unknown[];
         contributors?: unknown[];
         emptyRepository?: boolean;
         community?: unknown;
         issueTemplateStatus?: number;
+        issueFileStatus?: number;
         securityPolicy?: string | null;
     } = {},
 ) {
@@ -114,15 +116,51 @@ function commonHandler(
             apiPath.startsWith('/repos/slu/project/contents/') &&
             accept === 'application/vnd.github.raw+json'
         ) {
+            if (
+                options.issueFileStatus !== undefined &&
+                apiPath.endsWith('/bug.yml')
+            ) {
+                return jsonResponse({ message: 'Unavailable' }, {}, options.issueFileStatus);
+            }
             const name = apiPath.split('/').at(-1);
             return textResponse(`raw content for ${name}`);
         }
         if (apiPath === '/repos/slu/project') {
+            if (options.repositoryStatus !== undefined) {
+                return jsonResponse(
+                    { message: 'Repository not available' },
+                    {},
+                    options.repositoryStatus,
+                );
+            }
             return jsonResponse(options.repository ?? repository());
         }
         if (apiPath === '/repos/slu/project/readme') {
             if (options.readmeError === 'auth') {
                 return jsonResponse({ message: 'Bad credentials' }, {}, 401);
+            }
+            if (options.readmeError === 'tos') {
+                return jsonResponse(
+                    {
+                        message: 'Repository access blocked',
+                        block: { reason: 'tos' },
+                    },
+                    {},
+                    403,
+                );
+            }
+            if (options.readmeError === 'sso') {
+                return jsonResponse(
+                    {
+                        message: 'Resource protected by organization SAML enforcement',
+                        block: { reason: 'sso' },
+                    },
+                    {},
+                    403,
+                );
+            }
+            if (options.readmeError === 'permission') {
+                return jsonResponse({ message: 'Resource not accessible' }, {}, 403);
             }
             return jsonResponse(
                 { message: 'Not Found' },
@@ -348,6 +386,71 @@ describe('enrichRepository', () => {
         ).rejects.toMatchObject({ status: 401 });
     });
 
+    test('classifies a repository-detail 404 as a skippable unavailable repository', async () => {
+        await expect(
+            enrichRepository(
+                commonHandler({ repositoryStatus: 404 }),
+                candidate,
+                university,
+            ),
+        ).rejects.toMatchObject({
+            name: 'RepositoryEnrichmentSkipError',
+            skippedRepository: {
+                repositoryId: 77,
+                repositoryName: 'slu/project',
+                status: 404,
+                reasonCode: 'repository_unavailable_404',
+            },
+        });
+    });
+
+    test('retains a structured ToS 403 from a raw-text endpoint for recovery policy', async () => {
+        await expect(
+            enrichRepository(
+                commonHandler({ readmeError: 'tos' }),
+                candidate,
+                university,
+            ),
+        ).rejects.toMatchObject({
+            name: 'RepositoryEnrichmentSkipError',
+            skippedRepository: {
+                status: 403,
+                reasonCode: 'github_tos_block',
+                endpoint: 'https://api.github.com/repos/slu/project/readme',
+            },
+        });
+    });
+
+    test.each(['permission', 'sso'] as const)(
+        'keeps unexplained and SSO HTTP 403 errors fatal (%s)',
+        async (readmeError) => {
+            await expect(
+                enrichRepository(
+                    commonHandler({ readmeError }),
+                    candidate,
+                    university,
+                ),
+            ).rejects.toMatchObject({
+                name: 'GitHubRequestError',
+                status: 403,
+                classification: 'permission',
+            });
+        },
+    );
+
+    test('does not treat a nested content 404 as a repository skip', async () => {
+        await expect(
+            enrichRepository(
+                commonHandler({
+                    repository: repository({ fork: true }),
+                    issueFileStatus: 404,
+                }),
+                candidate,
+                university,
+            ),
+        ).rejects.toMatchObject({ name: 'GitHubRequestError', status: 404 });
+    });
+
     test('rejects unsafe GitHub counts instead of coercing them', async () => {
         await expect(
             enrichRepository(
@@ -359,7 +462,11 @@ describe('enrichRepository', () => {
                 candidate,
                 university,
             ),
-        ).rejects.toThrow(/safe integer/);
+        ).rejects.toMatchObject({
+            name: 'RepositoryRecordValidationError',
+            repository: 'slu/project',
+            field: 'stargazers_count',
+        });
     });
 
     test('rejects malformed contributor payloads', async () => {
@@ -371,6 +478,26 @@ describe('enrichRepository', () => {
                 candidate,
                 university,
             ),
-        ).rejects.toThrow(/safe integer/);
+        ).rejects.toMatchObject({
+            name: 'RepositoryRecordValidationError',
+            repository: 'slu/project',
+            field: 'contributions',
+        });
+    });
+
+    test('reports the repository field for invalid descriptive payload values without exposing content', async () => {
+        await expect(
+            enrichRepository(
+                commonHandler({
+                    repository: repository({ description: { private: 'value' } }),
+                }),
+                candidate,
+                university,
+            ),
+        ).rejects.toMatchObject({
+            name: 'RepositoryRecordValidationError',
+            repository: 'slu/project',
+            field: 'description',
+        });
     });
 });

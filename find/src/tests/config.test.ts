@@ -67,6 +67,28 @@ describe('scraping configuration', () => {
         expect(parseCliOptions(['--strict']).policy).toBe('strict');
     });
 
+    test('rejects actual NUL in university keys and search strings', () => {
+        expect(() =>
+            validateScrapingConfiguration({
+                universities: [
+                    { key: 'University\u0000', fullName: 'University', acronym: 'U' },
+                ],
+            }),
+        ).toThrow(/key must not contain an actual NUL/);
+        expect(() =>
+            validateScrapingConfiguration({
+                universities: [
+                    {
+                        key: 'University',
+                        fullName: 'University',
+                        acronym: 'U',
+                        queries: { repositories: 'text\u0000query' },
+                    },
+                ],
+            }),
+        ).toThrow(/repositories must not contain an actual NUL/);
+    });
+
     test('uses the documented host defaults and rejects invalid configuration before database setup', async () => {
         expect(
             getDatabasePoolConfig({

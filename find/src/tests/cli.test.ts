@@ -2,6 +2,7 @@ import {
     formatCliSummary,
     getCliExitCode,
     parseCliOptions,
+    withDatabasePreflight,
 } from '../cli';
 import type { ScrapingRunResult } from '../types/scraping';
 
@@ -27,6 +28,8 @@ const partialResult: ScrapingRunResult = {
             discovered: 3,
             committed: 3,
             skippedOwners: [skippedOwner],
+            skippedRepositories: [],
+            warnings: [],
         },
     ],
     failures: [],
@@ -37,6 +40,8 @@ const partialResult: ScrapingRunResult = {
             discovered: 3,
             committed: 3,
             skippedOwners: [skippedOwner],
+            skippedRepositories: [],
+            warnings: [],
         },
     ],
 };
@@ -55,6 +60,8 @@ function emptyResult(): ScrapingRunResult {
                 discovered: 0,
                 committed: 0,
                 skippedOwners: [],
+                skippedRepositories: [],
+                warnings: [],
             },
         ],
         failures: [],
@@ -65,6 +72,8 @@ function emptyResult(): ScrapingRunResult {
                 discovered: 0,
                 committed: 0,
                 skippedOwners: [],
+                skippedRepositories: [],
+                warnings: [],
             },
         ],
     };
@@ -73,6 +82,24 @@ function emptyResult(): ScrapingRunResult {
 test('defaults to best effort and accepts strict mode', () => {
     expect(parseCliOptions([]).policy).toBe('best-effort');
     expect(parseCliOptions(['--strict']).policy).toBe('strict');
+});
+
+test('does not start scraping or make GitHub requests after preflight failure', async () => {
+    let githubRequests = 0;
+    const scrape = async () => {
+        githubRequests += 1;
+        return emptyResult();
+    };
+
+    await expect(
+        withDatabasePreflight(
+            async () => {
+                throw new Error('preflight failed');
+            },
+            scrape,
+        ),
+    ).rejects.toThrow('preflight failed');
+    expect(githubRequests).toBe(0);
 });
 
 test('uses documented exit codes with fatal failures taking precedence over partial results', () => {
@@ -125,6 +152,8 @@ test('labels a zero-row partial run and a mixed partial/fatal run clearly', () =
                 discovered: 0,
                 committed: 0,
                 skippedOwners: [skippedOwner],
+                skippedRepositories: [],
+                warnings: [],
             },
         ],
     };

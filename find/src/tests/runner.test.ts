@@ -10,6 +10,7 @@ import {
     jsonResponse,
     nextPageHeader,
     searchEnvelope,
+    textResponse,
 } from './githubFixtures';
 
 const configuration: ScrapingConfiguration = {
@@ -95,6 +96,82 @@ function sharedRepositoryClient(
     });
 }
 
+function recoveryClient(
+    candidates: Array<{ id: number; full_name: string }>,
+    options: { description?: string | null; failStatus?: number } = {},
+) {
+    return createTestClient((url) => {
+        if (url.pathname === '/search/repositories') {
+            return jsonResponse(searchEnvelope(candidates));
+        }
+        if (url.pathname === '/search/users') {
+            return jsonResponse(searchEnvelope([]));
+        }
+        const detail = candidates.find(
+            (candidate) => `/repos/${candidate.full_name}` === url.pathname,
+        );
+        if (detail) {
+            if (detail.full_name.endsWith('/tos')) {
+                return jsonResponse(
+                    {
+                        message: 'Repository access blocked',
+                        block: { reason: 'tos' },
+                    },
+                    {},
+                    403,
+                );
+            }
+            if (detail.full_name.endsWith('/missing')) {
+                return jsonResponse({ message: 'Not Found' }, {}, 404);
+            }
+            if (options.failStatus !== undefined) {
+                return jsonResponse({ message: 'Resource not accessible' }, {}, options.failStatus);
+            }
+            return jsonResponse({
+                id: detail.id,
+                full_name: detail.full_name,
+                owner: { login: 'slu', type: 'Organization' },
+                private: false,
+                license: null,
+                language: 'TypeScript',
+                html_url: `https://github.com/${detail.full_name}`,
+                description: options.description ?? null,
+                fork: false,
+                created_at: '2020-01-01T00:00:00Z',
+                updated_at: '2020-01-02T00:00:00Z',
+                pushed_at: null,
+                homepage: null,
+                size: 0,
+                stargazers_count: 0,
+                watchers_count: 0,
+                forks_count: 0,
+                open_issues_count: 0,
+                subscribers_count: 0,
+            });
+        }
+        const goodPrefix = '/repos/slu/good';
+        if (url.pathname === `${goodPrefix}/readme`) {
+            return jsonResponse({ message: 'Not Found' }, {}, 404);
+        }
+        if (
+            url.pathname === `${goodPrefix}/releases` ||
+            url.pathname === `${goodPrefix}/contributors`
+        ) {
+            return jsonResponse([]);
+        }
+        if (url.pathname === `${goodPrefix}/community/profile`) {
+            return jsonResponse({ files: {} });
+        }
+        if (url.pathname.startsWith(`${goodPrefix}/contents/`)) {
+            return jsonResponse({ message: 'Not Found' }, {}, 404);
+        }
+        if (url.pathname.startsWith('/repos/slu/')) {
+            return textResponse('readme with NUL \u0000');
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+}
+
 describe('runScraping', () => {
     test('keeps one repository identity associated with both configured universities', async () => {
         const persisted: Array<{
@@ -148,7 +225,7 @@ describe('runScraping', () => {
         expect(result.failed).toBe(1);
         expect(result.failures[0].university).toBe('University Two');
         expect(formatCliFailure(result.failures[0])).toMatch(
-            /marked results incomplete/,
+            /incomplete-discovery/,
         );
     });
 });
@@ -185,8 +262,7 @@ test('best-effort persists accessible candidates and reports a skipped user owne
         login: 'missing-owner',
         ownerType: 'User',
         status: 404,
-        endpoint:
-            'https://api.github.com/users/missing-owner/repos?per_page=100&type=owner',
+        endpoint: 'https://api.github.com/users/missing-owner/repos',
     });
     expect(persisted).toHaveLength(1);
     expect(persisted[0].records.map((record) => record.id)).toEqual([88]);
@@ -390,4 +466,198 @@ test('aborts sibling discovery requests on the first fatal error and preserves t
     const message = formatCliFailure(result.failures[0]);
     expect(message).toContain('HTTP 404');
     expect(message).not.toContain('Aborted');
+});
+
+test('continues past repository ToS blocks and root-detail 404s while committing accessible records', async () => {
+    const persisted: Array<readonly RepositoryScrapingRecord[]> = [];
+    let fatalCallbacks = 0;
+    const progress: Array<{ completed: number; skipped?: number }> = [];
+    const result = await runScraping(
+        {
+            ...configuration,
+            universities: configuration.universities.slice(0, 1),
+        },
+        {
+            client: recoveryClient([
+                { id: 101, full_name: 'slu/good' },
+                { id: 102, full_name: 'slu/tos' },
+                { id: 103, full_name: 'slu/missing' },
+            ]),
+            store: {
+                async upsertUniversity(_university, records) {
+                    persisted.push(records);
+                    return records.length;
+                },
+            },
+            onFatalError() {
+                fatalCallbacks += 1;
+            },
+            onProgress(event) {
+                if (event.type === 'progress' && event.phase === 'enrichment') {
+                    progress.push({
+                        completed: event.completed,
+                        skipped: event.skipped,
+                    });
+                }
+            },
+        },
+    );
+
+    expect(result.failed).toBe(0);
+    expect(result.partial).toBe(1);
+    expect(result.committed).toBe(1);
+    expect(result.results[0]).toMatchObject({
+        status: 'partial',
+        skippedRepositories: [
+            { repositoryId: 102, status: 403, reasonCode: 'github_tos_block' },
+            { repositoryId: 103, status: 404, reasonCode: 'repository_unavailable_404' },
+        ],
+    });
+    expect(persisted[0].map((record) => record.id)).toEqual([101]);
+    expect(fatalCallbacks).toBe(0);
+    expect(progress.at(-1)).toMatchObject({ completed: 3, skipped: 2 });
+});
+
+test('all skipped repositories produce a partial zero-commit result', async () => {
+    let writes = 0;
+    const result = await runScraping(
+        {
+            ...configuration,
+            universities: configuration.universities.slice(0, 1),
+        },
+        {
+            client: recoveryClient([
+                { id: 102, full_name: 'slu/tos' },
+                { id: 103, full_name: 'slu/missing' },
+            ]),
+            store: {
+                async upsertUniversity(_university, records) {
+                    writes += 1;
+                    expect(records).toEqual([]);
+                    return 0;
+                },
+            },
+        },
+    );
+
+    expect(writes).toBe(1);
+    expect(result).toMatchObject({ failed: 0, partial: 1, committed: 0 });
+    expect(result.results[0]).toMatchObject({
+        status: 'partial',
+        discovered: 2,
+        committed: 0,
+        skippedRepositories: expect.arrayContaining([
+            expect.objectContaining({ reasonCode: 'github_tos_block' }),
+            expect.objectContaining({ reasonCode: 'repository_unavailable_404' }),
+        ]),
+    });
+});
+
+test('strict policy fails on a skippable repository block before database write', async () => {
+    let writes = 0;
+    const result = await runScraping(
+        {
+            ...configuration,
+            universities: configuration.universities.slice(0, 1),
+        },
+        {
+            policy: 'strict',
+            client: recoveryClient([{ id: 102, full_name: 'slu/tos' }]),
+            store: {
+                async upsertUniversity() {
+                    writes += 1;
+                    return 1;
+                },
+            },
+        },
+    );
+
+    expect(writes).toBe(0);
+    expect(result.failed).toBe(1);
+    expect(formatCliFailure(result.failures[0])).toContain(
+        'GitHub block reason tos',
+    );
+});
+
+test('generic repository permission failures stay fatal and do not write', async () => {
+    let writes = 0;
+    const result = await runScraping(
+        {
+            ...configuration,
+            universities: configuration.universities.slice(0, 1),
+        },
+        {
+            client: recoveryClient(
+                [{ id: 101, full_name: 'slu/good' }],
+                { failStatus: 403 },
+            ),
+            store: {
+                async upsertUniversity() {
+                    writes += 1;
+                    return 1;
+                },
+            },
+        },
+    );
+
+    expect(writes).toBe(0);
+    expect(result.failed).toBe(1);
+    expect(formatCliFailure(result.failures[0])).toContain('HTTP 403');
+    expect(result.failures[0].skippedRepositories).toEqual([]);
+});
+
+test('NUL normalization is reported as a partial result and committed text is replaced', async () => {
+    let persisted: readonly RepositoryScrapingRecord[] = [];
+    const result = await runScraping(
+        {
+            ...configuration,
+            universities: configuration.universities.slice(0, 1),
+        },
+        {
+            client: recoveryClient([{ id: 101, full_name: 'slu/good' }], {
+                description: 'unsafe\u0000text',
+            }),
+            store: {
+                async upsertUniversity(_university, records) {
+                    persisted = records;
+                    return records.length;
+                },
+            },
+        },
+    );
+
+    expect(result.partial).toBe(1);
+    expect(result.results[0].warnings).toMatchObject([
+        { field: 'description', replacementCount: 1, code: 'nul_replaced' },
+    ]);
+    expect(persisted[0].description).toBe('unsafe�text');
+});
+
+test('retains text-normalization warnings when the later database write fails', async () => {
+    const databaseError = Object.assign(new Error('private write details'), {
+        code: '22021',
+    });
+    const result = await runScraping(
+        {
+            ...configuration,
+            universities: configuration.universities.slice(0, 1),
+        },
+        {
+            client: recoveryClient([{ id: 101, full_name: 'slu/good' }], {
+                description: 'unsafe\u0000text',
+            }),
+            store: {
+                async upsertUniversity() {
+                    throw databaseError;
+                },
+            },
+        },
+    );
+
+    expect(result.failed).toBe(1);
+    expect(result.failures[0].warnings).toMatchObject([
+        { field: 'description', replacementCount: 1 },
+    ]);
+    expect(formatCliFailure(result.failures[0])).toContain('SQLSTATE 22021');
+    expect(formatCliFailure(result.failures[0])).not.toContain('private write details');
 });

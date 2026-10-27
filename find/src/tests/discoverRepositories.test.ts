@@ -19,6 +19,30 @@ function repository(id: number, fullName = `owner/repo-${id}`) {
 }
 
 describe('discoverRepositories', () => {
+    test('rejects an identity containing an actual NUL before enrichment', async () => {
+        const client = createTestClient((url) => {
+            if (url.pathname === '/search/repositories') {
+                return jsonResponse(
+                    searchEnvelope([repository(42, 'owner/bad\u0000name')]),
+                );
+            }
+            if (url.pathname === '/search/users') {
+                return jsonResponse(searchEnvelope([]));
+            }
+            throw new Error(`Unexpected request: ${url}`);
+        });
+
+        await expect(
+            discoverRepositories(client, university, 2, {
+                university: university.key,
+            }),
+        ).rejects.toMatchObject({
+            name: 'RepositoryRecordValidationError',
+            repository: 'repository 42',
+            field: 'full_name',
+        });
+    });
+
     test('paginates, deduplicates overlapping repositories and owners, and uses the documented defaults', async () => {
         const client = createTestClient((url) => {
             if (url.pathname === '/search/repositories') {
@@ -190,7 +214,7 @@ describe('discoverRepositories', () => {
                 university: university.key,
                 login,
                 ownerType: kind,
-                endpoint: `https://api.github.com${endpoint}?per_page=100&${kind === 'Organization' ? 'type=public' : 'type=owner'}`,
+                endpoint: `https://api.github.com${endpoint}`,
                 status: 404,
                 reason: expect.stringContaining('HTTP 404'),
             }),
@@ -235,7 +259,9 @@ describe('discoverRepositories', () => {
         ]);
         expect(result.skippedOwners).toHaveLength(1);
         expect(result.skippedOwners[0].login).toBe('late-missing');
-        expect(result.skippedOwners[0].endpoint).toContain('page=2');
+        expect(result.skippedOwners[0].endpoint).toBe(
+            'https://api.github.com/orgs/late-missing/repos',
+        );
     });
 
     test('returns partial discovery when every owner is unavailable and has no candidates', async () => {

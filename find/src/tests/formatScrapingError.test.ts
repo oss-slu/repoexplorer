@@ -1,6 +1,10 @@
 import { formatScrapingError } from '../utils/formatScrapingError';
 import { GitHubRequestError } from '../utils/githubRequest';
-import { withScrapingContext } from '../utils/scrapingError';
+import {
+    RepositoryRecordValidationError,
+    ScrapingDatabaseWriteError,
+    withScrapingContext,
+} from '../utils/scrapingError';
 
 test('reports endpoint and attempts without credentials, headers, or response data', () => {
     const error = new GitHubRequestError(
@@ -12,7 +16,7 @@ test('reports endpoint and attempts without credentials, headers, or response da
         { attemptCount: 2, retryStopReason: 'request is not retryable' },
     );
     expect(formatScrapingError(error)).toBe(
-        'GitHub request failed (HTTP 404); GET https://api.github.com/users/missing-owner/repos?page=2&per_page=100; 2 attempts; retry stopped: request is not retryable',
+        'GitHub resource not found; HTTP 404; GET https://api.github.com/users/missing-owner/repos; 2 attempts; retry stopped: request is not retryable',
     );
     for (const secret of [
         'password',
@@ -57,7 +61,7 @@ test('retains safe search context and adds typed phase and owner context', () =>
     const formatted = formatScrapingError(error);
     expect(formatted).toContain('search, university Saint Louis University');
     expect(formatted).toContain('owner Organization slu-team');
-    expect(formatted).toContain('primary rate limit exhausted (HTTP 403)');
+    expect(formatted).toContain('GitHub primary rate limit exhausted; HTTP 403');
     expect(formatted).toContain('search bucket, 0 remaining of 30');
     expect(formatted).toContain('request ID ABC-123');
     expect(formatted).toContain('5 attempts');
@@ -104,6 +108,52 @@ test('handles malformed URLs and terminal controls without throwing', () => {
         'GET [endpoint unavailable]',
     );
     expect(formatScrapingError(new Error('Database\n unavailable'))).toBe(
-        'Database unavailable',
+        'unexpected scraping error',
     );
+});
+
+test('projects safe SQLSTATE and batch context without database details', () => {
+    const databaseError = Object.assign(new Error('private row and bind value'), {
+        code: '22021',
+        detail: 'private database detail',
+    });
+    const error = withScrapingContext(
+        new ScrapingDatabaseWriteError(4, 16, '22021', {
+            cause: databaseError,
+        }),
+        { phase: 'database write', university: 'University' },
+    );
+    const formatted = formatScrapingError(error);
+    expect(formatted).toContain('database write, university University');
+    expect(formatted).toContain('SQLSTATE 22021');
+    expect(formatted).toContain('batch 4 (16 records)');
+    expect(formatted).not.toContain('private');
+});
+
+test('projects repository and field for validation errors without content', () => {
+    const error = new RepositoryRecordValidationError(
+        'owner/repository',
+        'readme',
+        'raw text content must not appear in diagnostics',
+    );
+    const formatted = formatScrapingError(error);
+    expect(formatted).toBe(
+        'repository owner/repository, field readme: repository data validation failed',
+    );
+    expect(formatted).not.toContain('raw text content');
+});
+
+test('walks cyclic cause chains without throwing and keeps phase context', () => {
+    const error = new Error('untrusted cyclic message');
+    (error as Error & { cause?: unknown }).cause = error;
+    const formatted = formatScrapingError(
+        withScrapingContext(error, {
+            phase: 'enrichment',
+            university: 'University',
+        }),
+    );
+    expect(formatted).toBe(
+        'enrichment, university University: unexpected scraping error',
+    );
+    expect(formatted).not.toContain('untrusted');
 });

@@ -14,7 +14,18 @@ export type ScrapingProgressEvent =
           university: string;
           completed: number;
           total: number;
+          skipped?: number;
+          warnings?: number;
           label?: string;
+          elapsedMs: number;
+      }
+    | {
+          type: 'warning';
+          university: string;
+          repository: string;
+          field: string;
+          replacementCount: number;
+          code: 'nul_replaced';
           elapsedMs: number;
       }
     | {

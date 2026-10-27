@@ -1,9 +1,12 @@
 import { allOrThrow, mapWithConcurrency } from './utils/concurrency';
 import { GitHubRequestClient, GitHubRequestError } from './utils/githubRequest';
-import { withScrapingContext } from './utils/scrapingError';
+import {
+    RepositoryRecordValidationError,
+    withScrapingContext,
+} from './utils/scrapingError';
 import { paginateGitHub } from './utils/githubPagination';
 import { searchGitHub } from './utils/githubSearch';
-import { sanitizeGitHubEndpoint } from './utils/formatScrapingError';
+import { sanitizeGitHubEndpoint } from './utils/scrapingDiagnostics';
 import type { ScrapingProgressCallback } from './types/progress';
 import type {
     OwnerListingPolicy,
@@ -296,7 +299,8 @@ function parseOwner(value: unknown, expectedKind: OwnerKind): DiscoveredOwner {
     if (
         !isRecord(value) ||
         typeof value.login !== 'string' ||
-        value.login.trim() === ''
+        value.login.trim() === '' ||
+        value.login.includes('\u0000')
     ) {
         throw new TypeError(
             `GitHub ${expectedKind.toLowerCase()} search returned an invalid owner`,
@@ -321,15 +325,21 @@ function parseRepositoryCandidate(value: unknown): RepositoryCandidate {
         !Number.isSafeInteger(value.id) ||
         value.id <= 0
     ) {
-        throw new TypeError(
+        throw new RepositoryRecordValidationError(
+            `repository ${String(value.id)}`,
+            'id',
             'GitHub repository result has an invalid or unsafe ID',
         );
     }
     if (
         typeof value.full_name !== 'string' ||
-        !/^[^/]+\/[^/]+$/.test(value.full_name)
+        value.full_name.includes('\u0000') ||
+        !/^[^/]+\/[^/]+$/.test(value.full_name) ||
+        value.full_name.split('/').some((part) => part.trim() === '')
     ) {
-        throw new TypeError(
+        throw new RepositoryRecordValidationError(
+            `repository ${value.id}`,
+            'full_name',
             `GitHub repository ${value.id} has an invalid full_name`,
         );
     }

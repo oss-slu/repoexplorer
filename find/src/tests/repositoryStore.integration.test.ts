@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
 import { RepositoryStore } from '../db/repositoryStore';
 import type { RepositoryScrapingRecord } from '../types/scraping';
+import { normalizeRepositoryText } from '../utils/normalizeRepositoryText';
 
 const databaseUrl = process.env.FINDER_TEST_DATABASE_URL;
 const adminDatabaseUrl =
@@ -119,6 +120,32 @@ integrationDescribe('RepositoryStore PostgreSQL integration', () => {
         );
     });
 
+    test('passes read-only database preflight with the application role', async () => {
+        await expect(store.preflight()).resolves.toBeUndefined();
+    });
+
+    test('reproduces PostgreSQL NUL rejection and persists the normalized value', async () => {
+        const university = `${testPrefix}-nul`;
+        const rawRecord = record(university, 8_765_432_120, {
+            description: 'synthetic\u0000description',
+        });
+
+        await expect(
+            adminPool.query('SELECT $1::text AS description', [rawRecord.description]),
+        ).rejects.toThrow(/invalid byte sequence|NUL/i);
+
+        const normalized = normalizeRepositoryText([rawRecord]);
+        expect(normalized.warnings).toMatchObject([
+            { field: 'description', replacementCount: 1 },
+        ]);
+        await store.upsertUniversity(university, normalized.records);
+        const persisted = await adminPool.query(
+            'SELECT description FROM public.repository_scraping WHERE id = $1 AND university = $2',
+            [rawRecord.id, university],
+        );
+        expect(persisted.rows[0].description).toBe('synthetic�description');
+    });
+
     test('allows one GitHub ID under different universities', async () => {
         const id = 8_765_432_102;
         const firstUniversity = `${testPrefix}-one`;
@@ -164,7 +191,16 @@ integrationDescribe('RepositoryStore PostgreSQL integration', () => {
                     description: 'trigger-failure',
                 }),
             ]),
-        ).rejects.toThrow(/intentional integration failure/);
+        ).rejects.toMatchObject({
+            name: 'ScrapingDatabaseWriteError',
+            message: 'Repository database batch failed',
+            sqlState: 'P0001',
+            batchNumber: 2,
+            batchSize: 1,
+            cause: expect.objectContaining({
+                message: 'intentional integration failure',
+            }),
+        });
 
         const result = await adminPool.query(
             'SELECT count(*)::int AS count FROM public.repository_scraping WHERE university = $1',

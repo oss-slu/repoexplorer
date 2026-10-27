@@ -171,6 +171,7 @@ export class GitHubResponseParseError extends Error {
         readonly url: string,
         options?: ErrorOptions,
         readonly attemptCount = 1,
+        readonly requestId?: string,
     ) {
         super(
             `GitHub returned invalid JSON for ${url} (status ${status})`,
@@ -594,6 +595,7 @@ export class GitHubRequestClient {
                     response.status,
                     url.toString(),
                     attemptCount,
+                    response.headers.get('x-github-request-id') ?? undefined,
                 );
             } catch (error) {
                 // HTTP status and headers still govern retries for HTML or text errors.
@@ -807,7 +809,17 @@ function parseResponseBody(
     status: number,
     url: string,
     attemptCount: number,
+    requestId?: string,
 ): unknown {
+    // Error responses keep structured GitHub fields even for raw-text endpoints.
+    if (status >= 400) {
+        if (rawBody.trim() === '') return null;
+        try {
+            return JSON.parse(rawBody) as unknown;
+        } catch {
+            return rawBody;
+        }
+    }
     if (responseType === 'text') {
         return rawBody;
     }
@@ -822,6 +834,7 @@ function parseResponseBody(
             url,
             { cause },
             attemptCount,
+            requestId,
         );
     }
 }
