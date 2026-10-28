@@ -71,7 +71,7 @@ describe('SidebarFilters', () => {
     it('renders different filter types', () => {
         render(<TestSidebar filters={filters} />);
 
-        expect(screen.getByText('Stars: 0')).toBeInTheDocument();
+        expect(screen.getByRole('slider', { name: 'Stars' })).toHaveValue('0');
         expect(screen.getByText('Language')).toBeInTheDocument();
         expect(screen.getByRole('slider')).toBeInTheDocument();
         expect(
@@ -85,7 +85,7 @@ describe('SidebarFilters', () => {
     it('uses the provided default values', () => {
         render(<TestSidebar filters={filtersWithDefaults} />);
 
-        expect(screen.getByText('Stars: 25')).toBeInTheDocument();
+        expect(screen.getByRole('slider', { name: 'Stars' })).toHaveValue('25');
         expect(screen.getByText('Python')).toBeInTheDocument();
     });
 
@@ -106,7 +106,7 @@ describe('SidebarFilters', () => {
             screen.getByRole('button', { name: 'Reset All Filters' }),
         );
 
-        expect(screen.getByText('Stars: 25')).toBeInTheDocument();
+        expect(screen.getByRole('slider', { name: 'Stars' })).toHaveValue('25');
         expect(screen.getByText('Python')).toBeInTheDocument();
         expect(
             screen.queryByRole('button', { name: 'Remove Java' }),
@@ -148,7 +148,7 @@ describe('SidebarFilters', () => {
             screen.getByRole('button', { name: 'Reset All Filters' }),
         );
 
-        expect(screen.getByText('Stars: 0')).toBeInTheDocument();
+        expect(screen.getByRole('slider', { name: 'Stars' })).toHaveValue('0');
 
         expect(
             screen.queryByRole('button', { name: 'Remove Python' }),
