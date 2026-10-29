@@ -15,6 +15,7 @@ export type GitHubQuery = URLSearchParams | Record<string, GitHubQueryValue>;
 export interface GitHubRequestConfig {
     baseUrl?: string;
     token?: string;
+    tokenProvider?: (signal?: AbortSignal) => Promise<string>;
     headers?: HeadersInit;
     timeoutMs?: number;
     maxRetries?: number;
@@ -36,6 +37,8 @@ export interface GitHubRequestOptions {
     signal?: AbortSignal;
     responseType?: GitHubResponseType;
     timeoutMs?: number;
+    /** Allow an empty 204 response only for endpoints whose contract documents it. */
+    allowNoContent?: boolean;
 }
 
 export interface GitHubResponse<T> {
@@ -43,9 +46,17 @@ export interface GitHubResponse<T> {
     status: number;
     headers: Headers;
     url: string;
+    notModified?: boolean;
 }
 
-type RateLimitBucket = 'core' | 'search';
+export type RateLimitBucket = 'core' | 'search';
+export type GitHubAccessReason =
+    | 'sso-required'
+    | 'token-resource-inaccessible'
+    | 'integration-resource-inaccessible'
+    | 'unknown-forbidden';
+export type GitHubSsoStatus = 'required' | 'partial-results';
+export type GitHubBlockReason = 'github_contributors_size_limit';
 export type GitHubErrorClassification =
     | 'primary rate limit'
     | 'secondary rate limit'
@@ -57,6 +68,14 @@ export type GitHubErrorClassification =
 export interface GitHubRateLimitDiagnostics {
     bucket: RateLimitBucket;
     classification: 'primary rate limit' | 'secondary rate limit';
+    limit?: number;
+    remaining?: number;
+    resetAt?: number;
+    retryAfterMs?: number;
+}
+
+export interface GitHubRateLimitObservation {
+    bucket: RateLimitBucket;
     limit?: number;
     remaining?: number;
     resetAt?: number;
@@ -95,10 +114,22 @@ class TransientAttemptError extends Error {
         message: string,
         readonly url: string,
         readonly timedOut: boolean,
+        readonly retryable = true,
+        readonly retryStopReason = 'transient retry budget exhausted',
         options?: ErrorOptions,
     ) {
         super(message, options);
         this.name = 'TransientAttemptError';
+    }
+}
+
+/** Safe terminal failure while obtaining request credentials. */
+export class GitHubCredentialProviderError extends Error {
+    constructor() {
+        super(
+            'Could not obtain GitHub credentials; check the credential provider configuration and authentication.',
+        );
+        this.name = 'GitHubCredentialProviderError';
     }
 }
 
@@ -107,6 +138,14 @@ export class GitHubRequestError extends Error {
     readonly requestId?: string;
     readonly classification: GitHubErrorClassification;
     readonly rateLimit?: GitHubRateLimitDiagnostics;
+    readonly rateLimitObservation?: GitHubRateLimitObservation;
+    readonly accessReason?: GitHubAccessReason;
+    readonly ssoStatus?: GitHubSsoStatus;
+    readonly blockReason?: GitHubBlockReason;
+    readonly retryAfterMs?: number;
+    readonly requestedUrl: string;
+    readonly apiOrigin: string;
+    readonly apiBasePath: string;
     attemptCount: number;
     retryStopReason?: string;
 
@@ -121,6 +160,14 @@ export class GitHubRequestError extends Error {
             requestId?: string;
             classification?: GitHubErrorClassification;
             rateLimit?: GitHubRateLimitDiagnostics;
+            rateLimitObservation?: GitHubRateLimitObservation;
+            accessReason?: GitHubAccessReason;
+            ssoStatus?: GitHubSsoStatus;
+            blockReason?: GitHubBlockReason;
+            retryAfterMs?: number;
+            requestedUrl?: string;
+            apiOrigin?: string;
+            apiBasePath?: string;
             retryStopReason?: string;
         } = {},
     ) {
@@ -130,7 +177,40 @@ export class GitHubRequestError extends Error {
         this.requestId = details.requestId;
         this.classification = details.classification ?? 'other';
         this.rateLimit = details.rateLimit;
+        this.rateLimitObservation = details.rateLimitObservation;
+        this.accessReason = details.accessReason;
+        this.ssoStatus = details.ssoStatus;
+        this.blockReason = details.blockReason;
+        this.retryAfterMs = details.retryAfterMs;
+        this.requestedUrl = details.requestedUrl ?? url;
+        this.apiOrigin = details.apiOrigin ?? safeOrigin(url);
+        this.apiBasePath = details.apiBasePath ?? '';
         this.retryStopReason = details.retryStopReason;
+    }
+}
+
+export type GitHubRedirectFailureReason =
+    | 'missing-location'
+    | 'invalid-location'
+    | 'insecure-protocol'
+    | 'cross-origin'
+    | 'redirect-loop'
+    | 'hop-limit';
+
+/** Safe failure raised when an API redirect cannot be followed within policy. */
+export class GitHubRedirectError extends Error {
+    readonly requestId?: string;
+
+    constructor(
+        readonly status: number,
+        readonly url: string,
+        readonly reason: GitHubRedirectFailureReason,
+        readonly attemptCount: number,
+        requestId?: string,
+    ) {
+        super(`GitHub API redirect could not be followed (${reason})`);
+        this.name = 'GitHubRedirectError';
+        this.requestId = requestId;
     }
 }
 
@@ -171,6 +251,7 @@ export class GitHubResponseParseError extends Error {
         readonly url: string,
         options?: ErrorOptions,
         readonly attemptCount = 1,
+        readonly requestId?: string,
     ) {
         super(
             `GitHub returned invalid JSON for ${url} (status ${status})`,
@@ -192,7 +273,10 @@ const DEFAULT_MAX_RATE_LIMIT_RETRIES = 4;
 const MAX_RATE_LIMIT_RESET_HORIZON_MS = 24 * 60 * 60 * 1_000;
 const MAX_TIMER_DELAY_MS = 2_147_000_000;
 const DEFAULT_RATE_LIMIT_RESET_BUFFER_MS = 1_000;
-const RETRYABLE_STATUSES = new Set([409, 412, 502, 503, 504]);
+const MAX_TRANSIENT_RETRY_AFTER_MS = 60_000;
+const MAX_REDIRECT_HOPS = 5;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const RETRYABLE_STATUSES = new Set([408, 500, 502, 503, 504]);
 
 class GitHubRequestQueue {
     private readonly pending: QueuedRequest[] = [];
@@ -345,6 +429,8 @@ class GitHubRequestQueue {
 
 export class GitHubRequestClient {
     private readonly baseUrl: string;
+    private readonly apiOrigin: string;
+    private readonly apiBasePath: string;
     private readonly defaultHeaders: Headers;
     private readonly timeoutMs: number;
     private readonly maxRetries: number;
@@ -353,6 +439,7 @@ export class GitHubRequestClient {
     private readonly retryBaseDelayMs: number;
     private readonly retryMaxDelayMs: number;
     private readonly fetchImplementation: typeof globalThis.fetch;
+    private readonly tokenProvider?: (signal?: AbortSignal) => Promise<string>;
     private readonly now: () => number;
     private readonly random: () => number;
     private readonly sleep: (
@@ -366,6 +453,17 @@ export class GitHubRequestClient {
 
     constructor(config: GitHubRequestConfig = {}) {
         this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
+        const parsedBaseUrl = new URL(this.baseUrl);
+        if (parsedBaseUrl.protocol !== 'https:') {
+            throw new TypeError('GitHub API base URL must use HTTPS');
+        }
+        if (parsedBaseUrl.username || parsedBaseUrl.password) {
+            throw new TypeError(
+                'GitHub API base URL must not include credentials',
+            );
+        }
+        this.apiOrigin = parsedBaseUrl.origin;
+        this.apiBasePath = parsedBaseUrl.pathname.replace(/\/+$/, '');
         this.timeoutMs = validatePositiveInteger(
             config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
             'timeoutMs',
@@ -395,6 +493,7 @@ export class GitHubRequestClient {
             'concurrency',
         );
         this.fetchImplementation = config.fetch ?? globalThis.fetch;
+        this.tokenProvider = config.tokenProvider;
         this.now = config.now ?? Date.now;
         this.random = config.random ?? Math.random;
         this.sleep = config.sleep ?? abortableSleep;
@@ -412,8 +511,9 @@ export class GitHubRequestClient {
             Accept: 'application/vnd.github+json',
         });
         mergeHeaders(this.defaultHeaders, config.headers);
-        if (config.token && !this.defaultHeaders.has('Authorization')) {
-            this.defaultHeaders.set('Authorization', `Bearer ${config.token}`);
+        const token = config.token?.trim();
+        if (token && !this.defaultHeaders.has('Authorization')) {
+            this.defaultHeaders.set('Authorization', `Bearer ${token}`);
         }
     }
 
@@ -446,6 +546,9 @@ export class GitHubRequestClient {
         );
         const responseType = options.responseType ?? 'json';
         const signal = options.signal ?? this.runSignal;
+        const hasConditionalRequest = Boolean(
+            requestHeaders.get('if-none-match')?.trim(),
+        );
         let attempts = 0;
         let transientRetries = 0;
         let rateLimitRetries = 0;
@@ -467,6 +570,9 @@ export class GitHubRequestClient {
                         bucket,
                         attempts,
                         rateLimitRetries + 1,
+                        this.tokenProvider,
+                        options.allowNoContent ?? false,
+                        hasConditionalRequest,
                     ),
                 );
 
@@ -501,7 +607,18 @@ export class GitHubRequestClient {
                     error.retryStopReason = 'transient retry budget exhausted';
                     throw error;
                 }
-                await this.sleep(this.retryDelay(transientRetries), signal);
+                if (
+                    error.retryAfterMs !== undefined &&
+                    error.retryAfterMs > MAX_TRANSIENT_RETRY_AFTER_MS
+                ) {
+                    error.retryStopReason = 'server retry delay exceeds budget';
+                    throw error;
+                }
+                const backoff = this.retryDelay(transientRetries);
+                await this.sleep(
+                    Math.max(backoff, error.retryAfterMs ?? 0),
+                    signal,
+                );
                 transientRetries += 1;
             } catch (error) {
                 if (signal?.aborted) {
@@ -510,6 +627,15 @@ export class GitHubRequestClient {
 
                 if (!(error instanceof TransientAttemptError)) {
                     throw error;
+                }
+
+                if (!error.retryable) {
+                    throw new GitHubNetworkError(
+                        url.toString(),
+                        attempts,
+                        { cause: error },
+                        error.retryStopReason,
+                    );
                 }
 
                 if (transientRetries >= this.maxRetries) {
@@ -543,7 +669,11 @@ export class GitHubRequestClient {
         requestBucket: RateLimitBucket,
         attemptCount: number,
         rateLimitAttempt: number,
+        tokenProvider: ((signal?: AbortSignal) => Promise<string>) | undefined,
+        allowNoContent: boolean,
+        hasConditionalRequest: boolean,
     ): Promise<AttemptResult> {
+        const requestedUrl = new URL(url);
         const controller = new AbortController();
         let timedOut = false;
         const onCallerAbort = () => controller.abort(callerSignal?.reason);
@@ -557,18 +687,115 @@ export class GitHubRequestClient {
             timedOut = true;
             controller.abort();
         }, timeoutMs);
+        let finalUrl!: URL;
 
         try {
             let response: Response;
             let rawBody: string;
             try {
-                response = await this.fetchImplementation(url, {
-                    method: 'GET',
-                    headers,
-                    signal: controller.signal,
-                });
+                const attemptHeaders = new Headers(headers);
+                if (tokenProvider) {
+                    let token: string;
+                    try {
+                        token = await tokenProvider(controller.signal);
+                    } catch {
+                        if (controller.signal.aborted)
+                            throw controller.signal.reason;
+                        throw new GitHubCredentialProviderError();
+                    }
+                    attemptHeaders.set('Authorization', `Bearer ${token}`);
+                }
+                let currentUrl = new URL(requestedUrl);
+                const visited = new Set([currentUrl.href]);
+                let redirectHops = 0;
+                while (true) {
+                    response = await this.fetchImplementation(currentUrl, {
+                        method: 'GET',
+                        headers: attemptHeaders,
+                        signal: controller.signal,
+                        redirect: 'manual',
+                    });
+                    if (!REDIRECT_STATUSES.has(response.status)) break;
+                    const requestId = safeRequestId(
+                        response.headers.get('x-github-request-id'),
+                    );
+                    await response.body?.cancel().catch(() => undefined);
+                    if (redirectHops >= MAX_REDIRECT_HOPS) {
+                        throw new GitHubRedirectError(
+                            response.status,
+                            currentUrl.toString(),
+                            'hop-limit',
+                            attemptCount,
+                            requestId,
+                        );
+                    }
+                    const location = response.headers.get('location');
+                    if (!location) {
+                        throw new GitHubRedirectError(
+                            response.status,
+                            currentUrl.toString(),
+                            'missing-location',
+                            attemptCount,
+                            requestId,
+                        );
+                    }
+                    let nextUrl: URL;
+                    try {
+                        nextUrl = new URL(location, currentUrl);
+                    } catch {
+                        throw new GitHubRedirectError(
+                            response.status,
+                            currentUrl.toString(),
+                            'invalid-location',
+                            attemptCount,
+                            requestId,
+                        );
+                    }
+                    if (nextUrl.protocol !== 'https:') {
+                        throw new GitHubRedirectError(
+                            response.status,
+                            currentUrl.toString(),
+                            'insecure-protocol',
+                            attemptCount,
+                            requestId,
+                        );
+                    }
+                    if (nextUrl.origin !== this.apiOrigin) {
+                        throw new GitHubRedirectError(
+                            response.status,
+                            currentUrl.toString(),
+                            'cross-origin',
+                            attemptCount,
+                            requestId,
+                        );
+                    }
+                    if (nextUrl.username || nextUrl.password) {
+                        throw new GitHubRedirectError(
+                            response.status,
+                            currentUrl.toString(),
+                            'invalid-location',
+                            attemptCount,
+                            requestId,
+                        );
+                    }
+                    if (visited.has(nextUrl.href)) {
+                        throw new GitHubRedirectError(
+                            response.status,
+                            currentUrl.toString(),
+                            'redirect-loop',
+                            attemptCount,
+                            requestId,
+                        );
+                    }
+                    visited.add(nextUrl.href);
+                    currentUrl = nextUrl;
+                    redirectHops += 1;
+                }
                 rawBody = await response.text();
+                finalUrl = currentUrl;
             } catch (cause) {
+                if (cause instanceof GitHubCredentialProviderError) throw cause;
+                if (cause instanceof GitHubRedirectError) throw cause;
                 if (callerSignal?.aborted) {
                     throw createAbortError(callerSignal);
                 }
@@ -576,8 +803,12 @@ export class GitHubRequestClient {
                     timedOut
                         ? `GitHub request timed out after ${timeoutMs} ms`
                         : 'GitHub network request failed',
-                    url.toString(),
+                    requestedUrl.toString(),
                     timedOut,
+                    !isTerminalNetworkFailure(cause),
+                    isTerminalNetworkFailure(cause)
+                        ? 'terminal network error'
+                        : 'transient retry budget exhausted',
                     { cause },
                 );
             }
@@ -586,33 +817,52 @@ export class GitHubRequestClient {
                 throw createAbortError(callerSignal);
             }
 
+            const isConditionalNotModified =
+                response.status === 304 && hasConditionalRequest;
+            const isAllowedNoContent =
+                response.status === 204 && allowNoContent;
             let data: unknown;
-            try {
-                data = parseResponseBody(
-                    rawBody,
-                    responseType,
-                    response.status,
-                    url.toString(),
-                    attemptCount,
-                );
-            } catch (error) {
-                // HTTP status and headers still govern retries for HTML or text errors.
-                if (
-                    response.ok ||
-                    !(error instanceof GitHubResponseParseError)
-                ) {
-                    throw error;
+            if (
+                response.status !== 200 &&
+                !isConditionalNotModified &&
+                !isAllowedNoContent &&
+                response.status < 400
+            ) {
+                data = null;
+            } else
+                try {
+                    data = parseResponseBody(
+                        rawBody,
+                        responseType,
+                        response.status,
+                        finalUrl.toString(),
+                        attemptCount,
+                        response.headers.get('x-github-request-id') ??
+                            undefined,
+                    );
+                } catch (error) {
+                    // HTTP status and headers still govern retries for HTML or text errors.
+                    if (
+                        response.ok ||
+                        !(error instanceof GitHubResponseParseError)
+                    ) {
+                        throw error;
+                    }
+                    data = rawBody;
                 }
-                data = rawBody;
-            }
             const githubResponse: GitHubResponse<unknown> = {
                 data,
                 status: response.status,
                 headers: response.headers,
-                url: url.toString(),
+                url: finalUrl.toString(),
+                ...(response.status === 304 ? { notModified: true } : {}),
             };
 
-            if (response.ok) {
+            if (
+                response.status === 200 ||
+                isConditionalNotModified ||
+                isAllowedNoContent
+            ) {
                 if (response.headers.get('x-ratelimit-remaining') === '0') {
                     const responseBucket = getBucketFromResource(
                         response.headers,
@@ -649,18 +899,55 @@ export class GitHubRequestClient {
                 rateLimit?.diagnostics.classification ??
                 classifyHttpError(response.status, response.headers, data);
             const error = new GitHubRequestError(
-                describeHttpError(response.status, data),
+                describeHttpError(response.status),
                 response.status,
                 data,
                 response.headers,
-                url.toString(),
+                finalUrl.toString(),
                 {
                     attemptCount,
-                    requestId:
-                        response.headers.get('x-github-request-id') ??
-                        undefined,
+                    requestId: safeRequestId(
+                        response.headers.get('x-github-request-id'),
+                    ),
                     classification,
                     rateLimit: rateLimit?.diagnostics,
+                    retryAfterMs: parseRetryAfter(
+                        response.headers.get('retry-after'),
+                        this.now(),
+                    ),
+                    requestedUrl: requestedUrl.toString(),
+                    apiOrigin: this.apiOrigin,
+                    apiBasePath: this.apiBasePath,
+                    ...(response.status === 403
+                        ? {
+                              accessReason: rateLimit
+                                  ? undefined
+                                  : classifyAccessReason(
+                                        response.headers,
+                                        data,
+                                    ),
+                              ssoStatus: parseGitHubSsoStatus(
+                                  response.headers.get('x-github-sso'),
+                              ),
+                              ...(!rateLimit
+                                  ? {
+                                        rateLimitObservation:
+                                            observeRateLimitHeaders(
+                                                response.headers,
+                                                requestBucket,
+                                                this.now(),
+                                            ),
+                                    }
+                                  : {}),
+                              blockReason: classifyGitHubBlockReason(
+                                  response.status,
+                                  classification,
+                                  rateLimit,
+                                  response.headers,
+                                  data,
+                              ),
+                          }
+                        : {}),
                 },
             );
 
@@ -748,9 +1035,12 @@ function createRequestUrl(
         ? new URL(endpoint)
         : new URL(endpoint.replace(/^\/+/, ''), normalizedBaseUrl);
 
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    if (url.protocol !== 'https:') {
+        throw new TypeError('GitHub API endpoints must use HTTPS');
+    }
+    if (url.username || url.password) {
         throw new TypeError(
-            `Unsupported GitHub API URL protocol: ${url.protocol}`,
+            'GitHub API endpoints must not include credentials',
         );
     }
     if (url.origin !== parsedBaseUrl.origin) {
@@ -807,7 +1097,17 @@ function parseResponseBody(
     status: number,
     url: string,
     attemptCount: number,
+    requestId?: string,
 ): unknown {
+    // Error responses keep structured GitHub fields even for raw-text endpoints.
+    if (status >= 400) {
+        if (rawBody.trim() === '') return null;
+        try {
+            return JSON.parse(rawBody) as unknown;
+        } catch {
+            return rawBody;
+        }
+    }
     if (responseType === 'text') {
         return rawBody;
     }
@@ -822,18 +1122,46 @@ function parseResponseBody(
             url,
             { cause },
             attemptCount,
+            requestId,
         );
     }
 }
 
-function describeHttpError(status: number, data: unknown): string {
-    if (data && typeof data === 'object' && 'message' in data) {
-        const message = (data as { message?: unknown }).message;
-        if (typeof message === 'string' && message.length > 0) {
-            return `GitHub API error (${status}): ${message}`;
-        }
-    }
+function describeHttpError(status: number): string {
     return `GitHub API request failed with status ${status}`;
+}
+
+function safeOrigin(value: string): string {
+    try {
+        return new URL(value).origin;
+    } catch {
+        return '';
+    }
+}
+
+function isTerminalNetworkFailure(error: unknown): boolean {
+    const terminalCodes = new Set([
+        'ERR_INVALID_URL',
+        'ERR_UNSUPPORTED_PROTOCOL',
+        'ERR_TLS_CERT_ALTNAME_INVALID',
+        'DEPTH_ZERO_SELF_SIGNED_CERT',
+        'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+        'CERT_HAS_EXPIRED',
+        'ERR_CERT_AUTHORITY_INVALID',
+    ]);
+    const visited = new Set<unknown>();
+    let current: unknown = error;
+    while (
+        current !== null &&
+        typeof current === 'object' &&
+        !visited.has(current)
+    ) {
+        visited.add(current);
+        const code = (current as { code?: unknown }).code;
+        if (typeof code === 'string' && terminalCodes.has(code)) return true;
+        current = (current as { cause?: unknown }).cause;
+    }
+    return false;
 }
 
 function getRateLimitDecision(
@@ -959,6 +1287,81 @@ function classifyHttpError(
     return 'other';
 }
 
+function classifyAccessReason(
+    headers: Headers,
+    data: unknown,
+): GitHubAccessReason {
+    if (
+        parseGitHubSsoStatus(headers.get('x-github-sso')) !== undefined ||
+        getErrorMessage(data).includes(
+            'resource protected by organization saml enforcement',
+        )
+    ) {
+        return 'sso-required';
+    }
+    const message = getErrorMessage(data);
+    if (message.includes('resource not accessible by integration')) {
+        return 'integration-resource-inaccessible';
+    }
+    if (message.includes('resource not accessible by personal access token')) {
+        return 'token-resource-inaccessible';
+    }
+    return 'unknown-forbidden';
+}
+
+function classifyGitHubBlockReason(
+    status: number,
+    classification: GitHubErrorClassification,
+    rateLimit: RateLimitDecision | undefined,
+    headers: Headers,
+    data: unknown,
+): GitHubBlockReason | undefined {
+    if (
+        status !== 403 ||
+        classification !== 'permission' ||
+        rateLimit !== undefined ||
+        parseGitHubSsoStatus(headers.get('x-github-sso')) !== undefined ||
+        classifyAccessReason(headers, data) !== 'unknown-forbidden'
+    ) {
+        return undefined;
+    }
+    const message = getErrorMessage(data).trim().replace(/\s+/g, ' ');
+    return message ===
+        'the history or contributor list is too large to list contributors for this repository via the api.'
+        ? 'github_contributors_size_limit'
+        : undefined;
+}
+
+function parseGitHubSsoStatus(
+    value: string | null,
+): GitHubSsoStatus | undefined {
+    if (value === null) return undefined;
+    const status = value.split(';', 1)[0].trim().toLowerCase();
+    return status === 'required' || status === 'partial-results'
+        ? status
+        : undefined;
+}
+
+function observeRateLimitHeaders(
+    headers: Headers,
+    requestBucket: RateLimitBucket,
+    now: number,
+): GitHubRateLimitObservation {
+    return {
+        bucket: getBucketFromResource(headers, requestBucket),
+        limit: parseSafeInteger(headers.get('x-ratelimit-limit')),
+        remaining: parseSafeInteger(headers.get('x-ratelimit-remaining')),
+        resetAt: parseSafeInteger(headers.get('x-ratelimit-reset')),
+        retryAfterMs: parseRetryAfter(headers.get('retry-after'), now),
+    };
+}
+
+function safeRequestId(value: string | null): string | undefined {
+    return value !== null && /^[A-Za-z0-9:-]{1,128}$/.test(value)
+        ? value
+        : undefined;
+}
+
 function getErrorMessage(data: unknown): string {
     let errorData = data;
     if (typeof errorData === 'string') {
@@ -983,8 +1386,9 @@ function parseRetryAfter(
     if (value === null || value.trim() === '') {
         return undefined;
     }
-    const seconds = Number(value);
-    if (Number.isFinite(seconds) && seconds >= 0) {
+    const trimmed = value.trim();
+    const seconds = /^\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN;
+    if (Number.isSafeInteger(seconds) && seconds >= 0) {
         const milliseconds = seconds * 1_000;
         return Number.isFinite(milliseconds) && milliseconds <= 8.64e15
             ? milliseconds
@@ -1018,9 +1422,10 @@ function primaryRateLimitDeadline(
         headers.get('x-ratelimit-reset'),
         now,
     );
-    const resetDeadline = resetAt !== undefined && resetAt * 1_000 > now
-        ? resetAt * 1_000 + resetBufferMs
-        : now + RATE_LIMIT_FALLBACK_DELAY_MS;
+    const resetDeadline =
+        resetAt !== undefined && resetAt * 1_000 > now
+            ? resetAt * 1_000 + resetBufferMs
+            : now + RATE_LIMIT_FALLBACK_DELAY_MS;
     const retryAfterDeadline =
         retryAfterMs === undefined ? 0 : now + retryAfterMs;
     return Math.max(resetDeadline, retryAfterDeadline);

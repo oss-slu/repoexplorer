@@ -1,0 +1,111 @@
+name: collect repository finder
+
+on:
+    schedule:
+        # The first Monday of each month performs full discovery. Other Mondays
+        # refresh known repositories.
+        - cron: '17 4 * * 1'
+    workflow_dispatch:
+        inputs:
+            mode:
+                description: Collection mode
+                type: choice
+                options:
+                    - full
+                    - refresh
+                default: full
+                required: true
+            university:
+                description: Optional exact university key from the finder config
+                type: string
+                required: false
+            run_id:
+                description: Optional run ID to resume a previous checkpoint
+                type: string
+                required: false
+
+concurrency:
+    group: repository-finder-collection
+    queue: max
+    cancel-in-progress: false
+
+permissions:
+    contents: read
+
+jobs:
+    collect:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        steps:
+            - name: checkout
+              uses: actions/checkout@v4
+
+            - name: setup node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+
+            - name: install finder dependencies
+              run: npm ci --prefix find
+
+            - name: prepare university configuration
+              env:
+                  UNIVERSITIES_CONFIG_JSON: ${{ vars.FINDER_UNIVERSITIES_CONFIG_JSON }}
+              run: |
+                  if [[ -n "$UNIVERSITIES_CONFIG_JSON" ]]; then
+                      printf '%s' "$UNIVERSITIES_CONFIG_JSON" > find/config/universities.json
+                  else
+                      cp find/config/universities.example.json find/config/universities.json
+                  fi
+
+            - name: choose scheduled collection mode
+              id: mode
+              env:
+                  EVENT_NAME: ${{ github.event_name }}
+                  INPUT_MODE: ${{ inputs.mode }}
+              run: |
+                  if [[ "$EVENT_NAME" == "schedule" ]]; then
+                      day_of_month="$(date -u +%d)"
+                      if (( 10#$day_of_month <= 7 )); then
+                          selected_mode=full
+                      else
+                          selected_mode=refresh
+                      fi
+                  else
+                      selected_mode="${INPUT_MODE:-full}"
+                  fi
+                  echo "mode=$selected_mode" >> "$GITHUB_OUTPUT"
+
+            - name: create GitHub App installation token
+              id: app-token
+              uses: actions/create-github-app-token@v3
+              with:
+                  app-id: ${{ secrets.FINDER_GITHUB_APP_ID }}
+                  private-key: ${{ secrets.FINDER_GITHUB_APP_PRIVATE_KEY }}
+                  owner: ${{ github.repository_owner }}
+                  permission-contents: read
+
+            - name: build finder
+              run: npm run build --prefix find
+
+            - name: collect repositories
+              env:
+                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+                  FINDER_GITHUB_APP_ID: ${{ secrets.FINDER_GITHUB_APP_ID }}
+                  FINDER_GITHUB_APP_PRIVATE_KEY: ${{ secrets.FINDER_GITHUB_APP_PRIVATE_KEY }}
+                  FINDER_GITHUB_APP_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+                  GITHUB_RUN_ID: ${{ inputs.run_id || github.run_id }}
+                  MODE: ${{ steps.mode.outputs.mode }}
+                  UNIVERSITY: ${{ inputs.university }}
+                  PGHOST: ${{ secrets.FINDER_PGHOST }}
+                  PGPORT: ${{ secrets.FINDER_PGPORT || '5432' }}
+                  PGDATABASE: ${{ secrets.FINDER_PGDATABASE }}
+                  PGUSER: ${{ secrets.FINDER_PGUSER }}
+                  PGPASSWORD: ${{ secrets.FINDER_PGPASSWORD }}
+              run: |
+                  args=(--mode "$MODE" --run-id "$GITHUB_RUN_ID" --verbose)
+                  if [[ -n "$UNIVERSITY" ]]; then
+                      args+=(--university "$UNIVERSITY")
+                  fi
+                  npm start --prefix find -- --config config/universities.json "${args[@]}"

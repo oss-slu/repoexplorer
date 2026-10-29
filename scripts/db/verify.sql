@@ -56,6 +56,28 @@ BEGIN
                     'type_prediction_gpt5_mini', 'scraped_at'
                 ]::TEXT[],
                 ARRAY['id', 'university']::TEXT[]
+            ),
+            (
+                'repository_scraping_cache',
+                ARRAY['university', 'repository_id', 'etag', 'updated_at']::TEXT[],
+                ARRAY['university', 'repository_id']::TEXT[]
+            ),
+            (
+                'repository_scraping_runs',
+                ARRAY[
+                    'run_id', 'university', 'mode', 'status', 'candidate_count',
+                    'committed_count', 'skipped_owners', 'skipped_repositories',
+                    'warnings', 'created_at', 'updated_at', 'completed_at'
+                ]::TEXT[],
+                ARRAY['run_id', 'university']::TEXT[]
+            ),
+            (
+                'repository_scraping_run_repositories',
+                ARRAY[
+                    'run_id', 'university', 'repository_id', 'candidate', 'status',
+                    'record', 'etag', 'skipped_repository', 'warnings', 'updated_at'
+                ]::TEXT[],
+                ARRAY['run_id', 'university', 'repository_id']::TEXT[]
             )
         ) AS expected(name, columns, primary_key)
     LOOP
@@ -119,7 +141,19 @@ BEGIN
         OR NOT has_table_privilege(current_user, 'public.repository_scraping', 'SELECT')
         OR NOT has_table_privilege(current_user, 'public.repository_scraping', 'INSERT')
         OR NOT has_table_privilege(current_user, 'public.repository_scraping', 'UPDATE')
-        OR NOT has_table_privilege(current_user, 'public.repository_scraping', 'DELETE') THEN
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping', 'DELETE')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping_cache', 'SELECT')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping_cache', 'INSERT')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping_cache', 'UPDATE')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping_cache', 'DELETE')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping_runs', 'SELECT')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping_runs', 'INSERT')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping_runs', 'UPDATE')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping_runs', 'DELETE')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping_run_repositories', 'SELECT')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping_run_repositories', 'INSERT')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping_run_repositories', 'UPDATE')
+        OR NOT has_table_privilege(current_user, 'public.repository_scraping_run_repositories', 'DELETE') THEN
         RAISE EXCEPTION 'Application role % lacks one or more table CRUD privileges', current_user;
     END IF;
 END;
