@@ -1,5 +1,11 @@
-import { enrichRepository } from '../enrichRepository';
-import { GitHubRequestError } from '../utils/githubRequest';
+import {
+    enrichRepository,
+    refreshRepositoryMetadata,
+} from '../enrichRepository';
+import {
+    GitHubRequestClient,
+    GitHubRequestError,
+} from '../utils/githubRequest';
 import type {
     RepositoryCandidate,
     UniversityConfiguration,
@@ -17,6 +23,24 @@ const university: UniversityConfiguration = {
     acronym: 'SLU',
 };
 const candidate: RepositoryCandidate = { id: 77, fullName: 'slu/project' };
+
+test('drops a stale ETag when a modified repository response has no ETag', async () => {
+    const client = createTestClient((url, init) => {
+        expect(url.pathname).toBe('/repos/slu/project');
+        expect(new Headers(init.headers).get('if-none-match')).toBe('"old"');
+        return jsonResponse(repository({ description: 'Changed' }));
+    });
+
+    const result = await refreshRepositoryMetadata(client, {
+        ...candidate,
+        etag: '"old"',
+    });
+
+    expect(result).toEqual({
+        status: 'modified',
+        metadata: repository({ description: 'Changed' }),
+    });
+});
 
 function repository(overrides: Record<string, unknown> = {}) {
     return {
@@ -52,10 +76,21 @@ function commonHandler(
     options: {
         repository?: Record<string, unknown>;
         repositoryStatus?: number;
+        repositoryStatusBody?: 'json' | 'text' | 'empty';
         readmeStatus?: number;
-        readmeError?: 'auth' | 'permission' | 'sso' | 'tos';
+        readmeStatusBody?: 'json' | 'text' | 'empty';
+        readmeRedirectTo?: string;
+        readmeError?:
+            'auth' | 'permission' | 'sso' | 'tos' | 'contributors-size-limit';
         releases?: unknown[];
         contributors?: unknown[];
+        contributorsError?: {
+            status: number;
+            message: string;
+            page?: number;
+            headers?: Record<string, string>;
+        };
+        contributorsRedirectTo?: string;
         emptyRepository?: boolean;
         community?: unknown;
         issueTemplateStatus?: number;
@@ -66,6 +101,9 @@ function commonHandler(
     return createTestClient((url, init) => {
         const apiPath = url.pathname;
         const accept = new Headers(init.headers).get('accept');
+        if (apiPath === '/repos/slu/project-other/contents/README.md') {
+            return statusResponse(451, 'text');
+        }
         if (apiPath === '/repos/slu/project/contents/SECURITY.md') {
             return jsonResponse({ message: 'Not Found' }, {}, 404);
         }
@@ -120,20 +158,38 @@ function commonHandler(
                 options.issueFileStatus !== undefined &&
                 apiPath.endsWith('/bug.yml')
             ) {
-                return jsonResponse({ message: 'Unavailable' }, {}, options.issueFileStatus);
+                return jsonResponse(
+                    { message: 'Unavailable' },
+                    {},
+                    options.issueFileStatus,
+                );
             }
             const name = apiPath.split('/').at(-1);
             return textResponse(`raw content for ${name}`);
         }
         if (apiPath === '/repos/slu/project') {
             if (options.repositoryStatus !== undefined) {
-                return jsonResponse(
-                    { message: 'Repository not available' },
-                    {},
+                return statusResponse(
                     options.repositoryStatus,
+                    options.repositoryStatusBody ?? 'json',
                 );
             }
             return jsonResponse(options.repository ?? repository());
+        }
+        if (
+            options.readmeRedirectTo &&
+            apiPath === '/repos/slu/project/readme'
+        ) {
+            return new Response(null, {
+                status: 301,
+                headers: { location: options.readmeRedirectTo },
+            });
+        }
+        if (
+            options.readmeRedirectTo &&
+            apiPath === options.readmeRedirectTo.split('?')[0]
+        ) {
+            return statusResponse(451, options.readmeStatusBody ?? 'json');
         }
         if (apiPath === '/repos/slu/project/readme') {
             if (options.readmeError === 'auth') {
@@ -152,7 +208,8 @@ function commonHandler(
             if (options.readmeError === 'sso') {
                 return jsonResponse(
                     {
-                        message: 'Resource protected by organization SAML enforcement',
+                        message:
+                            'Resource protected by organization SAML enforcement',
                         block: { reason: 'sso' },
                     },
                     {},
@@ -160,12 +217,25 @@ function commonHandler(
                 );
             }
             if (options.readmeError === 'permission') {
-                return jsonResponse({ message: 'Resource not accessible' }, {}, 403);
+                return jsonResponse(
+                    { message: 'Resource not accessible' },
+                    {},
+                    403,
+                );
             }
-            return jsonResponse(
-                { message: 'Not Found' },
-                {},
+            if (options.readmeError === 'contributors-size-limit') {
+                return jsonResponse(
+                    {
+                        message:
+                            'The history or contributor list is too large to list contributors for this repository via the API.',
+                    },
+                    {},
+                    403,
+                );
+            }
+            return statusResponse(
                 options.readmeStatus ?? 404,
+                options.readmeStatusBody ?? 'json',
             );
         }
         if (apiPath === '/repos/slu/project/releases') {
@@ -179,16 +249,43 @@ function commonHandler(
             );
         }
         if (apiPath === '/repos/slu/project/contributors') {
+            if (options.contributorsRedirectTo) {
+                return new Response(null, {
+                    status: 301,
+                    headers: { location: options.contributorsRedirectTo },
+                });
+            }
+            const page = Number(url.searchParams.get('page') ?? '1');
+            if (
+                options.contributorsError &&
+                (options.contributorsError.page ?? 1) === page
+            ) {
+                return jsonResponse(
+                    { message: options.contributorsError.message },
+                    options.contributorsError.headers,
+                    options.contributorsError.status,
+                );
+            }
             if (options.emptyRepository) {
                 return new Response(null, { status: 204 });
             }
             const contributors = options.contributors ?? [];
-            if (url.searchParams.get('page') === '2') {
+            if (page === 2) {
                 return jsonResponse(contributors[1] ?? []);
             }
             return jsonResponse(
                 contributors[0] ?? [],
                 contributors.length > 1 ? { link: nextPageHeader(url, 2) } : {},
+            );
+        }
+        if (apiPath === '/repos/slu/project-other/contributors') {
+            return jsonResponse(
+                {
+                    message:
+                        'The history or contributor list is too large to list contributors for this repository via the API.',
+                },
+                {},
+                403,
             );
         }
         if (apiPath === '/repos/slu/project/community/profile') {
@@ -224,6 +321,18 @@ function commonHandler(
         }
         throw new Error(`Unexpected request: ${url}`);
     });
+}
+
+function statusResponse(
+    status: number,
+    body: 'json' | 'text' | 'empty',
+): Response {
+    const headers = { 'x-github-request-id': 'REQ-451' };
+    if (body === 'empty') return new Response(null, { status, headers });
+    if (body === 'text') {
+        return new Response('<html>unavailable</html>', { status, headers });
+    }
+    return jsonResponse({ message: 'Repository unavailable' }, headers, status);
 }
 
 describe('enrichRepository', () => {
@@ -421,6 +530,248 @@ describe('enrichRepository', () => {
         });
     });
 
+    test('skips only the exact GitHub contributor-list size-limit response', async () => {
+        await expect(
+            enrichRepository(
+                commonHandler({
+                    contributorsError: {
+                        status: 403,
+                        message:
+                            'The history or contributor list is too large to list contributors for this repository via the API.',
+                    },
+                }),
+                candidate,
+                university,
+            ),
+        ).rejects.toMatchObject({
+            name: 'RepositoryEnrichmentSkipError',
+            skippedRepository: {
+                repositoryName: 'slu/project',
+                endpoint:
+                    'https://api.github.com/repos/slu/project/contributors',
+                status: 403,
+                reasonCode: 'github_contributors_unavailable',
+                reason: 'GitHub contributor history exceeds the REST API listing limit.',
+            },
+        });
+    });
+
+    test('skips a contributor-size limit found on a later contributor page', async () => {
+        await expect(
+            enrichRepository(
+                commonHandler({
+                    contributors: [
+                        [{ login: 'alpha', contributions: 1 }],
+                        [{ login: 'beta', contributions: 1 }],
+                    ],
+                    contributorsError: {
+                        status: 403,
+                        message:
+                            'The history or contributor list is too large to list contributors for this repository via the API.',
+                        page: 2,
+                    },
+                }),
+                candidate,
+                university,
+            ),
+        ).rejects.toMatchObject({
+            name: 'RepositoryEnrichmentSkipError',
+            skippedRepository: {
+                reasonCode: 'github_contributors_unavailable',
+            },
+        });
+    });
+
+    test.each([
+        {
+            label: 'generic forbidden body',
+            status: 403,
+            message: 'Forbidden',
+            headers: {} as Record<string, string>,
+        },
+        {
+            label: 'SSO header',
+            status: 403,
+            message:
+                'The history or contributor list is too large to list contributors for this repository via the API.',
+            headers: { 'x-github-sso': 'required' } as Record<string, string>,
+        },
+    ])(
+        'keeps contributor 403 fatal for $label',
+        async ({ status, message, headers }) => {
+            await expect(
+                enrichRepository(
+                    commonHandler({
+                        contributorsError: { status, message, headers },
+                    }),
+                    candidate,
+                    university,
+                ),
+            ).rejects.toMatchObject({
+                name: 'GitHubRequestError',
+                status: 403,
+            });
+        },
+    );
+
+    test('does not treat the contributor-size message from another repository endpoint as a skip', async () => {
+        await expect(
+            enrichRepository(
+                commonHandler({ readmeError: 'contributors-size-limit' }),
+                candidate,
+                university,
+            ),
+        ).rejects.toMatchObject({
+            name: 'GitHubRequestError',
+            status: 403,
+        });
+    });
+
+    test('does not skip a contributor-size response redirected to a sibling repository', async () => {
+        await expect(
+            enrichRepository(
+                commonHandler({
+                    contributorsRedirectTo:
+                        '/repos/slu/project-other/contributors',
+                }),
+                candidate,
+                university,
+            ),
+        ).rejects.toMatchObject({
+            name: 'GitHubRequestError',
+            status: 403,
+        });
+    });
+
+    test('skips a root repository 451 and retains its safe request ID', async () => {
+        await expect(
+            enrichRepository(
+                commonHandler({
+                    repositoryStatus: 451,
+                    repositoryStatusBody: 'json',
+                }),
+                candidate,
+                university,
+            ),
+        ).rejects.toMatchObject({
+            name: 'RepositoryEnrichmentSkipError',
+            skippedRepository: {
+                status: 451,
+                reasonCode: 'github_legal_restriction',
+                requestId: 'REQ-451',
+                reason: 'GitHub returned HTTP 451: repository access is unavailable for legal reasons.',
+            },
+        });
+    });
+
+    test.each(['text', 'empty'] as const)(
+        'skips a nested repository 451 with a %s body and discards the in-progress record',
+        async (body) => {
+            await expect(
+                enrichRepository(
+                    commonHandler({
+                        readmeStatus: 451,
+                        readmeStatusBody: body,
+                    }),
+                    candidate,
+                    university,
+                ),
+            ).rejects.toMatchObject({
+                name: 'RepositoryEnrichmentSkipError',
+                skippedRepository: {
+                    status: 451,
+                    reasonCode: 'github_legal_restriction',
+                    endpoint: 'https://api.github.com/repos/slu/project/readme',
+                    requestId: 'REQ-451',
+                },
+            });
+        },
+    );
+
+    test('attributes a same-origin rename redirect 451 to the requested repository', async () => {
+        await expect(
+            enrichRepository(
+                commonHandler({
+                    readmeStatusBody: 'empty',
+                    readmeRedirectTo: '/repos/slu/renamed-project/readme',
+                }),
+                candidate,
+                university,
+            ),
+        ).rejects.toMatchObject({
+            name: 'RepositoryEnrichmentSkipError',
+            skippedRepository: {
+                repositoryName: 'slu/project',
+                endpoint:
+                    'https://api.github.com/repos/slu/renamed-project/readme',
+                status: 451,
+                reasonCode: 'github_legal_restriction',
+            },
+        });
+    });
+
+    test('classifies repository 451 under a configured API base path', async () => {
+        const client = new GitHubRequestClient({
+            baseUrl: 'https://api.github.example/api/v3/',
+            maxRetries: 0,
+            fetch: (async (input) => {
+                const url = new URL(String(input));
+                if (url.pathname.endsWith('/readme')) {
+                    return statusResponse(451, 'text');
+                }
+                if (url.pathname.endsWith('/contributors')) {
+                    return new Response(null, { status: 204 });
+                }
+                if (url.pathname.endsWith('/community/profile')) {
+                    return jsonResponse({ files: {} });
+                }
+                if (url.pathname.endsWith('/releases')) return jsonResponse([]);
+                if (url.pathname.includes('/contents/')) {
+                    return jsonResponse({ message: 'Not found' }, {}, 404);
+                }
+                throw new Error(`Unexpected request: ${url.pathname}`);
+            }) as typeof fetch,
+            sleep: async () => {},
+        });
+
+        await expect(
+            enrichRepository(
+                client,
+                candidate,
+                university,
+                undefined,
+                repository(),
+            ),
+        ).rejects.toMatchObject({
+            name: 'RepositoryEnrichmentSkipError',
+            skippedRepository: {
+                status: 451,
+                reasonCode: 'github_legal_restriction',
+                endpoint:
+                    'https://api.github.example/api/v3/repos/slu/project/readme',
+            },
+        });
+    });
+
+    test('does not skip a repository for a sibling path-prefix 451', async () => {
+        const client = commonHandler({
+            community: {
+                files: {
+                    code_of_conduct_file: {
+                        url: 'https://api.github.com/repos/slu/project-other/contents/README.md',
+                    },
+                },
+            },
+        });
+
+        await expect(
+            enrichRepository(client, candidate, university),
+        ).rejects.toMatchObject({
+            name: 'GitHubRequestError',
+            status: 451,
+        });
+    });
+
     test.each(['permission', 'sso'] as const)(
         'keeps unexplained and SSO HTTP 403 errors fatal (%s)',
         async (readmeError) => {
@@ -489,7 +840,9 @@ describe('enrichRepository', () => {
         await expect(
             enrichRepository(
                 commonHandler({
-                    repository: repository({ description: { private: 'value' } }),
+                    repository: repository({
+                        description: { private: 'value' },
+                    }),
                 }),
                 candidate,
                 university,

@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import { RepositoryStore } from '../db/repositoryStore';
 import type { RepositoryScrapingRecord } from '../types/scraping';
 import { normalizeRepositoryText } from '../utils/normalizeRepositoryText';
+import { ScrapingCancellationError } from '../utils/scrapingError';
 
 const databaseUrl = process.env.FINDER_TEST_DATABASE_URL;
 const adminDatabaseUrl =
@@ -15,6 +16,12 @@ const testPrefix = `issue58-${process.pid}-${Date.now()}`;
 const tableSqlPath = fileURLToPath(
     new URL(
         '../../../scripts/db/repository-scraping-table.sql',
+        import.meta.url,
+    ),
+);
+const checkpointSqlPath = fileURLToPath(
+    new URL(
+        '../../../scripts/db/repository-scraping-checkpoints.sql',
         import.meta.url,
     ),
 );
@@ -32,6 +39,7 @@ integrationDescribe('RepositoryStore PostgreSQL integration', () => {
         }
         adminPool = new Pool({ connectionString: adminDatabaseUrl, max: 1 });
         await adminPool.query(await readFile(tableSqlPath, 'utf8'));
+        await adminPool.query(await readFile(checkpointSqlPath, 'utf8'));
         if (applicationUser || applicationPassword) {
             if (!applicationUser || !applicationPassword) {
                 throw new Error(
@@ -63,6 +71,14 @@ integrationDescribe('RepositoryStore PostgreSQL integration', () => {
                         [`${testPrefix}%`],
                     );
                 }
+                await adminPool.query(
+                    'DELETE FROM public.repository_scraping_runs WHERE university LIKE $1',
+                    [`${testPrefix}%`],
+                );
+                await adminPool.query(
+                    'DELETE FROM public.repository_scraping_cache WHERE university LIKE $1',
+                    [`${testPrefix}%`],
+                );
                 await adminPool.query(
                     'DROP FUNCTION IF EXISTS public.issue58_test_reject_record()',
                 );
@@ -124,6 +140,298 @@ integrationDescribe('RepositoryStore PostgreSQL integration', () => {
         await expect(store.preflight()).resolves.toBeUndefined();
     });
 
+    test('keeps repository work staged until completion, then publishes record and ETag', async () => {
+        const university = `${testPrefix}-checkpoint`;
+        const runId = `${testPrefix}-run`;
+        const repositoryId = 8_765_432_150;
+        const staleRepositoryId = 8_765_432_151;
+        const candidate = {
+            id: repositoryId,
+            fullName: 'checkpoint-owner/repository',
+            metadata: {
+                id: repositoryId,
+                full_name: 'checkpoint-owner/repository',
+            },
+        };
+        await store.upsertUniversity(university, [
+            record(university, staleRepositoryId, {
+                fullName: 'stale-owner/repository',
+            }),
+        ]);
+
+        expect(
+            await store.startOrLoadUniversityCollection(
+                runId,
+                university,
+                'full',
+            ),
+        ).toMatchObject({ status: 'discovering', discovered: 0 });
+        await store.saveDiscoveryCheckpoint(runId, university, [candidate], []);
+        await store.saveRepositoryCheckpoint(runId, university, {
+            candidate,
+            status: 'complete',
+            record: record(university, repositoryId, {
+                fullName: candidate.fullName,
+                htmlUrl: 'https://github.com/checkpoint-owner/repository',
+            }),
+            etag: '"checkpoint-etag"',
+        });
+
+        const stagedRows = await adminPool.query(
+            'SELECT id::text FROM public.repository_scraping WHERE university = $1 ORDER BY id',
+            [university],
+        );
+        expect(stagedRows.rows.map((row) => row.id)).toEqual([
+            String(staleRepositoryId),
+        ]);
+        expect(
+            await store.startOrLoadUniversityCollection(
+                runId,
+                university,
+                'full',
+            ),
+        ).toMatchObject({
+            status: 'ready',
+            discovered: 1,
+            candidates: [{ status: 'complete', etag: '"checkpoint-etag"' }],
+        });
+
+        expect(await store.publishUniversityCollection(runId, university)).toBe(
+            1,
+        );
+        const staleRow = await adminPool.query(
+            'SELECT count(*)::int AS count FROM public.repository_scraping WHERE university = $1 AND id = $2',
+            [university, staleRepositoryId],
+        );
+        expect(staleRow.rows[0].count).toBe(0);
+        const published = await store.startOrLoadUniversityCollection(
+            runId,
+            university,
+            'full',
+        );
+        expect(published).toMatchObject({
+            status: 'complete',
+            committed: 1,
+            candidates: [],
+        });
+        expect(await store.listKnownRepositories(university)).toEqual([
+            {
+                id: repositoryId,
+                fullName: 'checkpoint-owner/repository',
+                etag: '"checkpoint-etag"',
+            },
+        ]);
+    });
+
+    test('cancellation before COMMIT rolls publication back and retains checkpoints', async () => {
+        const university = `${testPrefix}-cancel-before-commit`;
+        const runId = `${testPrefix}-cancel-before-commit-run`;
+        const candidate = {
+            id: 8_765_432_170,
+            fullName: 'cancel-owner/repository',
+        };
+        await store.startOrLoadUniversityCollection(runId, university, 'full');
+        await store.saveDiscoveryCheckpoint(runId, university, [candidate], []);
+        await store.saveRepositoryCheckpoint(runId, university, {
+            candidate,
+            status: 'complete',
+            record: record(university, candidate.id, {
+                fullName: candidate.fullName,
+            }),
+        });
+
+        const controller = new AbortController();
+        const interruptAfterRunUpdate = interceptPoolQueries(pool, (sql) => {
+            if (sql.includes("SET status = 'complete'")) {
+                controller.abort(new ScrapingCancellationError('SIGINT'));
+            }
+        });
+        const cancellableStore = new RepositoryStore(interruptAfterRunUpdate, 1);
+
+        await expect(
+            cancellableStore.publishUniversityCollection(
+                runId,
+                university,
+                controller.signal,
+            ),
+        ).rejects.toMatchObject({
+            name: 'ScrapingCancellationError',
+            source: 'SIGINT',
+        });
+
+        expect(
+            await store.startOrLoadUniversityCollection(
+                runId,
+                university,
+                'full',
+            ),
+        ).toMatchObject({ status: 'ready', candidates: [{ status: 'complete' }] });
+        const published = await adminPool.query(
+            'SELECT count(*)::int AS count FROM public.repository_scraping WHERE university = $1',
+            [university],
+        );
+        expect(published.rows[0].count).toBe(0);
+        await expect(pool.query('SELECT 1')).resolves.toMatchObject({
+            rows: [{ '?column?': 1 }],
+        });
+    });
+
+    test('a successful COMMIT wins a concurrent cancellation race and reports committed rows', async () => {
+        const university = `${testPrefix}-commit-race`;
+        const runId = `${testPrefix}-commit-race-run`;
+        const candidate = {
+            id: 8_765_432_171,
+            fullName: 'race-owner/repository',
+        };
+        await store.startOrLoadUniversityCollection(runId, university, 'full');
+        await store.saveDiscoveryCheckpoint(runId, university, [candidate], []);
+        await store.saveRepositoryCheckpoint(runId, university, {
+            candidate,
+            status: 'complete',
+            record: record(university, candidate.id, {
+                fullName: candidate.fullName,
+            }),
+        });
+
+        const controller = new AbortController();
+        const interruptAfterCommit = interceptPoolQueries(pool, (sql) => {
+            if (sql === 'COMMIT') {
+                controller.abort(new ScrapingCancellationError('SIGTERM'));
+            }
+        });
+        const cancellableStore = new RepositoryStore(interruptAfterCommit, 1);
+
+        await expect(
+            cancellableStore.publishUniversityCollection(
+                runId,
+                university,
+                controller.signal,
+            ),
+        ).resolves.toBe(1);
+        expect(
+            await store.startOrLoadUniversityCollection(
+                runId,
+                university,
+                'full',
+            ),
+        ).toMatchObject({ status: 'complete', committed: 1, candidates: [] });
+        const published = await adminPool.query(
+            'SELECT count(*)::int AS count FROM public.repository_scraping WHERE university = $1',
+            [university],
+        );
+        expect(published.rows[0].count).toBe(1);
+        await expect(pool.query('SELECT 1')).resolves.toMatchObject({
+            rows: [{ '?column?': 1 }],
+        });
+    });
+
+    test('publishes healthy records for a partial run, persists documented skips, and preserves older rows', async () => {
+        const university = `${testPrefix}-legal-partial`;
+        const runId = `${testPrefix}-legal-run`;
+        const healthyId = 8_765_432_160;
+        const skippedId = 8_765_432_161;
+        const oldId = 8_765_432_162;
+        const contributorSkippedId = 8_765_432_163;
+        const healthyCandidate = {
+            id: healthyId,
+            fullName: 'partial-owner/healthy',
+            metadata: { id: healthyId, full_name: 'partial-owner/healthy' },
+        };
+        const skippedCandidate = {
+            id: skippedId,
+            fullName: 'partial-owner/unavailable',
+            metadata: { id: skippedId, full_name: 'partial-owner/unavailable' },
+        };
+        const contributorSkippedCandidate = {
+            id: contributorSkippedId,
+            fullName: 'partial-owner/large-history',
+            metadata: {
+                id: contributorSkippedId,
+                full_name: 'partial-owner/large-history',
+            },
+        };
+        await store.upsertUniversity(university, [
+            record(university, oldId, { fullName: 'old-owner/stale' }),
+        ]);
+        await store.startOrLoadUniversityCollection(runId, university, 'full');
+        await store.saveDiscoveryCheckpoint(
+            runId,
+            university,
+            [healthyCandidate, skippedCandidate, contributorSkippedCandidate],
+            [],
+        );
+        await store.saveRepositoryCheckpoint(runId, university, {
+            candidate: healthyCandidate,
+            status: 'complete',
+            record: record(university, healthyId, {
+                fullName: healthyCandidate.fullName,
+            }),
+        });
+        await store.saveRepositoryCheckpoint(runId, university, {
+            candidate: skippedCandidate,
+            status: 'skipped',
+            skippedRepository: {
+                university,
+                repositoryId: skippedId,
+                repositoryName: skippedCandidate.fullName,
+                endpoint:
+                    'https://api.github.com/repos/partial-owner/unavailable',
+                status: 451,
+                reasonCode: 'github_legal_restriction',
+                requestId: 'REQ-LEGAL-451',
+                reason: 'GitHub returned HTTP 451: repository access is unavailable for legal reasons.',
+            },
+        });
+        await store.saveRepositoryCheckpoint(runId, university, {
+            candidate: contributorSkippedCandidate,
+            status: 'skipped',
+            skippedRepository: {
+                university,
+                repositoryId: contributorSkippedId,
+                repositoryName: contributorSkippedCandidate.fullName,
+                endpoint:
+                    'https://api.github.com/repos/partial-owner/large-history/contributors',
+                status: 403,
+                reasonCode: 'github_contributors_unavailable',
+                requestId: 'REQ-CONTRIBUTORS-SIZE',
+                reason: 'GitHub contributor history exceeds the REST API listing limit.',
+            },
+        });
+
+        expect(await store.publishUniversityCollection(runId, university)).toBe(
+            1,
+        );
+        const rows = await adminPool.query(
+            'SELECT id::text FROM public.repository_scraping WHERE university = $1 ORDER BY id',
+            [university],
+        );
+        expect(rows.rows.map((row) => row.id)).toEqual([
+            String(healthyId),
+            String(oldId),
+        ]);
+        const published = await store.startOrLoadUniversityCollection(
+            runId,
+            university,
+            'full',
+        );
+        expect(published).toMatchObject({
+            status: 'complete',
+            committed: 1,
+            skippedRepositories: [
+                {
+                    status: 451,
+                    reasonCode: 'github_legal_restriction',
+                    requestId: 'REQ-LEGAL-451',
+                },
+                {
+                    status: 403,
+                    reasonCode: 'github_contributors_unavailable',
+                    requestId: 'REQ-CONTRIBUTORS-SIZE',
+                },
+            ],
+        });
+    });
+
     test('reproduces PostgreSQL NUL rejection and persists the normalized value', async () => {
         const university = `${testPrefix}-nul`;
         const rawRecord = record(university, 8_765_432_120, {
@@ -131,7 +439,9 @@ integrationDescribe('RepositoryStore PostgreSQL integration', () => {
         });
 
         await expect(
-            adminPool.query('SELECT $1::text AS description', [rawRecord.description]),
+            adminPool.query('SELECT $1::text AS description', [
+                rawRecord.description,
+            ]),
         ).rejects.toThrow(/invalid byte sequence|NUL/i);
 
         const normalized = normalizeRepositoryText([rawRecord]);
@@ -211,6 +521,35 @@ integrationDescribe('RepositoryStore PostgreSQL integration', () => {
     });
 });
 
+function interceptPoolQueries(
+    pool: Pool,
+    afterQuery: (query: string) => void,
+): Pool {
+    return {
+        connect: async () => {
+            const client = await pool.connect();
+            return new Proxy(client, {
+                get(target, property, receiver) {
+                    if (property === 'query') {
+                        return async (...args: unknown[]) => {
+                            const result = await Reflect.apply(
+                                target.query,
+                                target,
+                                args,
+                            );
+                            if (typeof args[0] === 'string') {
+                                afterQuery(args[0]);
+                            }
+                            return result;
+                        };
+                    }
+                    return Reflect.get(target, property, receiver) as unknown;
+                },
+            });
+        },
+    } as unknown as Pool;
+}
+
 async function prepareApplicationRole(
     adminPool: Pool,
     user: string,
@@ -239,6 +578,21 @@ async function prepareApplicationRole(
     await executeFormattedSql(
         adminPool,
         'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.repository_scraping TO %I',
+        [user],
+    );
+    await executeFormattedSql(
+        adminPool,
+        'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.repository_scraping_cache TO %I',
+        [user],
+    );
+    await executeFormattedSql(
+        adminPool,
+        'GRANT SELECT, INSERT, UPDATE ON TABLE public.repository_scraping_runs TO %I',
+        [user],
+    );
+    await executeFormattedSql(
+        adminPool,
+        'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.repository_scraping_run_repositories TO %I',
         [user],
     );
 }

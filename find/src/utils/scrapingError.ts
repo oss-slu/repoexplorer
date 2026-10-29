@@ -1,5 +1,8 @@
 import type { ScrapingPhase } from '../types/progress';
-import type { SkippedRepository } from '../types/scraping';
+import type {
+    ScrapingCancellationSource,
+    SkippedRepository,
+} from '../types/scraping';
 
 export interface ScrapingErrorContext {
     phase: ScrapingPhase;
@@ -10,10 +13,44 @@ export interface ScrapingErrorContext {
 }
 
 export type DatabasePreflightFailure =
-    | 'connection'
-    | 'missing-table'
-    | 'missing-columns'
-    | 'privileges';
+    'connection' | 'missing-table' | 'missing-columns' | 'privileges';
+
+export class ScrapingCancellationError extends Error {
+    constructor(readonly source: ScrapingCancellationSource) {
+        super(
+            source === 'caller'
+                ? 'Scrape cancelled by caller'
+                : `Scrape interrupted by ${source}`,
+        );
+        this.name = 'ScrapingCancellationError';
+    }
+}
+
+/** Map arbitrary AbortSignal reasons to a bounded, report-safe cancellation. */
+export function cancellationForSignal(
+    signal: AbortSignal | undefined,
+): ScrapingCancellationError | undefined {
+    if (!signal?.aborted) return undefined;
+    return (
+        findScrapingCancellation(signal.reason) ??
+        new ScrapingCancellationError('caller')
+    );
+}
+
+/** Walk wrappers without trusting their messages or looping through cyclic causes. */
+export function findScrapingCancellation(
+    error: unknown,
+): ScrapingCancellationError | undefined {
+    const visited = new Set<unknown>();
+    let current: unknown = error;
+    while (current && !visited.has(current)) {
+        visited.add(current);
+        if (current instanceof ScrapingCancellationError) return current;
+        if (!(current instanceof Error)) return undefined;
+        current = current.cause;
+    }
+    return undefined;
+}
 
 export class RepositoryRecordValidationError extends TypeError {
     constructor(
@@ -34,6 +71,21 @@ export class RepositoryEnrichmentSkipError extends Error {
     ) {
         super(skippedRepository.reason, options);
         this.name = 'RepositoryEnrichmentSkipError';
+    }
+}
+
+export function describeSkippedRepositoryReason(
+    reasonCode: SkippedRepository['reasonCode'],
+): string {
+    switch (reasonCode) {
+        case 'github_tos_block':
+            return 'GitHub blocked repository access for a Terms of Service restriction.';
+        case 'github_contributors_unavailable':
+            return 'GitHub contributor history exceeds the REST API listing limit.';
+        case 'repository_unavailable_404':
+            return 'The repository detail endpoint returned HTTP 404 after discovery.';
+        case 'github_legal_restriction':
+            return 'GitHub returned HTTP 451: repository access is unavailable for legal reasons.';
     }
 }
 

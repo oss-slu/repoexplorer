@@ -98,11 +98,24 @@ function sharedRepositoryClient(
 
 function recoveryClient(
     candidates: Array<{ id: number; full_name: string }>,
-    options: { description?: string | null; failStatus?: number } = {},
+    options: {
+        description?: string | null;
+        failStatus?: number;
+        incompleteFirstRepositorySearch?: boolean;
+    } = {},
 ) {
+    let repositorySearchAttempts = 0;
     return createTestClient((url) => {
         if (url.pathname === '/search/repositories') {
-            return jsonResponse(searchEnvelope(candidates));
+            repositorySearchAttempts += 1;
+            return jsonResponse(
+                searchEnvelope(
+                    candidates,
+                    candidates.length,
+                    options.incompleteFirstRepositorySearch &&
+                        repositorySearchAttempts === 1,
+                ),
+            );
         }
         if (url.pathname === '/search/users') {
             return jsonResponse(searchEnvelope([]));
@@ -123,6 +136,13 @@ function recoveryClient(
             }
             if (detail.full_name.endsWith('/missing')) {
                 return jsonResponse({ message: 'Not Found' }, {}, 404);
+            }
+            if (detail.full_name.endsWith('/legal')) {
+                return jsonResponse(
+                    { message: 'Legal availability body must not be reported' },
+                    { 'x-github-request-id': 'REQ-LEGAL-451' },
+                    451,
+                );
             }
             if (options.failStatus !== undefined) {
                 return jsonResponse({ message: 'Resource not accessible' }, {}, options.failStatus);
@@ -173,6 +193,62 @@ function recoveryClient(
 }
 
 describe('runScraping', () => {
+    test('reports caller cancellation as interruption and does not persist or emit a fatal error', async () => {
+        const controller = new AbortController();
+        let writes = 0;
+        let fatalCallbacks = 0;
+        const result = await runScraping(
+            { ...configuration, universities: configuration.universities.slice(0, 1) },
+            {
+                client: createTestClient((url, init) => {
+                    if (url.pathname === '/search/repositories') {
+                        return new Promise<Response>((_resolve, reject) => {
+                            const rejectOnAbort = () =>
+                                reject(init.signal?.reason);
+                            if (init.signal?.aborted) {
+                                rejectOnAbort();
+                                return;
+                            }
+                            init.signal?.addEventListener(
+                                'abort',
+                                rejectOnAbort,
+                                { once: true },
+                            );
+                            setTimeout(
+                                () => controller.abort(new Error('private stop reason')),
+                                0,
+                            );
+                        });
+                    }
+                    if (url.pathname === '/search/users') {
+                        return jsonResponse(searchEnvelope([]));
+                    }
+                    throw new Error(`Unexpected request: ${url.pathname}`);
+                }),
+                store: {
+                    async upsertUniversity() {
+                        writes += 1;
+                        return 0;
+                    },
+                },
+                signal: controller.signal,
+                onFatalError() {
+                    fatalCallbacks += 1;
+                },
+            },
+        );
+
+        expect(result).toMatchObject({ failed: 0, interrupted: 1, committed: 0 });
+        expect(result.outcomes[0]).toMatchObject({
+            status: 'interrupted',
+            cancellationSource: 'caller',
+            phase: 'search',
+        });
+        expect(writes).toBe(0);
+        expect(fatalCallbacks).toBe(0);
+        expect(JSON.stringify(result)).not.toContain('private stop reason');
+    });
+
     test('keeps one repository identity associated with both configured universities', async () => {
         const persisted: Array<{
             university: string;
@@ -227,6 +303,39 @@ describe('runScraping', () => {
         expect(formatCliFailure(result.failures[0])).toMatch(
             /incomplete-discovery/,
         );
+    });
+
+    test('publishes results after a transient search recovers', async () => {
+        const persisted: Array<{
+            university: string;
+            records: readonly RepositoryScrapingRecord[];
+        }> = [];
+        const result = await runScraping(
+            {
+                ...configuration,
+                universities: configuration.universities.slice(0, 1),
+            },
+            {
+                client: recoveryClient(
+                    [{ id: 89, full_name: 'slu/good' }],
+                    { incompleteFirstRepositorySearch: true },
+                ),
+                store: {
+                    async upsertUniversity(university, records) {
+                        persisted.push({ university, records });
+                        return records.length;
+                    },
+                },
+                searchRetrySleep: async () => {},
+            },
+        );
+
+        expect(result).toMatchObject({ failed: 0, committed: 1 });
+        expect(persisted).toHaveLength(1);
+        expect(persisted[0]).toMatchObject({
+            university: 'University One',
+            records: [expect.objectContaining({ id: 89 })],
+        });
     });
 });
 
@@ -457,7 +566,7 @@ test('aborts sibling discovery requests on the first fatal error and preserves t
     );
 
     expect(result.failed).toBe(1);
-    expect(abortedRequests).toBe(2);
+    expect(abortedRequests).toBe(1);
     expect(writes).toBe(0);
     expect(eventOrder[0]).toBe('fatal-reported');
     expect(eventOrder).toContain('sibling-aborted');
@@ -553,6 +662,65 @@ test('all skipped repositories produce a partial zero-commit result', async () =
     });
 });
 
+test('best-effort skips one 451 repository and commits its healthy sibling', async () => {
+    const persisted: Array<readonly RepositoryScrapingRecord[]> = [];
+    const result = await runScraping(
+        {
+            ...configuration,
+            universities: configuration.universities.slice(0, 1),
+        },
+        {
+            client: recoveryClient([
+                { id: 101, full_name: 'slu/good' },
+                { id: 104, full_name: 'slu/legal' },
+            ]),
+            store: {
+                async upsertUniversity(_university, records) {
+                    persisted.push(records);
+                    return records.length;
+                },
+            },
+        },
+    );
+
+    expect(result).toMatchObject({ failed: 0, partial: 1, committed: 1 });
+    expect(result.results[0].skippedRepositories).toEqual([
+        expect.objectContaining({
+            repositoryId: 104,
+            status: 451,
+            reasonCode: 'github_legal_restriction',
+            requestId: 'REQ-LEGAL-451',
+        }),
+    ]);
+    expect(persisted[0].map((record) => record.id)).toEqual([101]);
+});
+
+test('an all-451 best-effort run is partial with zero committed repositories', async () => {
+    let writes = 0;
+    const result = await runScraping(
+        {
+            ...configuration,
+            universities: configuration.universities.slice(0, 1),
+        },
+        {
+            client: recoveryClient([{ id: 104, full_name: 'slu/legal' }]),
+            store: {
+                async upsertUniversity(_university, records) {
+                    writes += 1;
+                    expect(records).toEqual([]);
+                    return 0;
+                },
+            },
+        },
+    );
+
+    expect(writes).toBe(1);
+    expect(result).toMatchObject({ failed: 0, partial: 1, committed: 0 });
+    expect(result.results[0].skippedRepositories).toEqual([
+        expect.objectContaining({ status: 451, reasonCode: 'github_legal_restriction' }),
+    ]);
+});
+
 test('strict policy fails on a skippable repository block before database write', async () => {
     let writes = 0;
     const result = await runScraping(
@@ -577,6 +745,34 @@ test('strict policy fails on a skippable repository block before database write'
     expect(formatCliFailure(result.failures[0])).toContain(
         'GitHub block reason tos',
     );
+});
+
+test('strict policy keeps a 451 category and writes no repository rows', async () => {
+    let writes = 0;
+    const result = await runScraping(
+        {
+            ...configuration,
+            universities: configuration.universities.slice(0, 1),
+        },
+        {
+            policy: 'strict',
+            client: recoveryClient([{ id: 104, full_name: 'slu/legal' }]),
+            store: {
+                async upsertUniversity() {
+                    writes += 1;
+                    return 1;
+                },
+            },
+        },
+    );
+
+    expect(writes).toBe(0);
+    expect(result.failed).toBe(1);
+    const message = formatCliFailure(result.failures[0]);
+    expect(message).toContain('HTTP 451');
+    expect(message).toContain('legal unavailability');
+    expect(message).not.toContain('Terms of Service');
+    expect(message).not.toContain('must not be reported');
 });
 
 test('generic repository permission failures stay fatal and do not write', async () => {

@@ -8,6 +8,7 @@ import type {
     UniversityConfiguration,
 } from './types/scraping';
 import {
+    describeSkippedRepositoryReason,
     RepositoryEnrichmentSkipError,
     RepositoryRecordValidationError,
 } from './utils/scrapingError';
@@ -57,6 +58,7 @@ export async function enrichRepository(
     candidate: RepositoryCandidate,
     university: UniversityConfiguration,
     now: () => Date = () => new Date(),
+    repositoryMetadata?: unknown,
 ): Promise<RepositoryScrapingRecord> {
     const endpoint = repositoryEndpoint(candidate.fullName);
     try {
@@ -66,6 +68,7 @@ export async function enrichRepository(
             university,
             now,
             endpoint,
+            repositoryMetadata,
         );
     } catch (error) {
         const skippedRepository = decideSkippedRepository(
@@ -94,15 +97,47 @@ export async function enrichRepository(
     }
 }
 
+export type RepositoryRefreshResult =
+    | { status: 'unchanged'; etag?: string }
+    | { status: 'modified'; metadata: unknown; etag?: string };
+
+/** Fetches the canonical repository resource, using its saved ETag when available. */
+export async function refreshRepositoryMetadata(
+    client: GitHubRequestClient,
+    candidate: RepositoryCandidate,
+): Promise<RepositoryRefreshResult> {
+    const response = await client.request<unknown>(
+        repositoryEndpoint(candidate.fullName),
+        {
+            ...(candidate.etag
+                ? { headers: { 'If-None-Match': candidate.etag } }
+                : {}),
+        },
+    );
+    const responseEtag = response.headers.get('etag') ?? undefined;
+    if (response.notModified || response.status === 304) {
+        const etag = responseEtag ?? candidate.etag;
+        return { status: 'unchanged', ...(etag ? { etag } : {}) };
+    }
+    return {
+        status: 'modified',
+        metadata: response.data,
+        ...(responseEtag ? { etag: responseEtag } : {}),
+    };
+}
+
 async function enrichRepositoryRecord(
     client: GitHubRequestClient,
     candidate: RepositoryCandidate,
     university: UniversityConfiguration,
     now: () => Date,
     endpoint: string,
+    repositoryMetadata?: unknown,
 ): Promise<RepositoryScrapingRecord> {
     const repository = parseRepositoryPayload(
-        await requestJson(client, endpoint),
+        hasRepositoryEnrichmentFields(repositoryMetadata)
+            ? repositoryMetadata
+            : await requestJson(client, endpoint),
         candidate,
     );
     if (repository.private) {
@@ -144,7 +179,9 @@ async function enrichRepositoryRecord(
     return {
         university: university.key,
         id: repository.id,
-        fullName: optionalString(repository.full_name, 'full_name') ?? candidate.fullName,
+        fullName:
+            optionalString(repository.full_name, 'full_name') ??
+            candidate.fullName,
         owner: repository.owner.login,
         license: normalizeLicense(repository.license),
         language: optionalString(repository.language, 'language'),
@@ -197,6 +234,34 @@ async function enrichRepositoryRecord(
     };
 }
 
+function hasRepositoryEnrichmentFields(value: unknown): boolean {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        return false;
+    }
+    const record = value as Record<string, unknown>;
+    return [
+        'id',
+        'full_name',
+        'owner',
+        'private',
+        'license',
+        'language',
+        'html_url',
+        'description',
+        'fork',
+        'created_at',
+        'updated_at',
+        'pushed_at',
+        'homepage',
+        'size',
+        'stargazers_count',
+        'watchers_count',
+        'forks_count',
+        'open_issues_count',
+        'subscribers_count',
+    ].every((field) => Object.hasOwn(record, field));
+}
+
 function decideSkippedRepository(
     error: unknown,
     candidate: RepositoryCandidate,
@@ -206,46 +271,168 @@ function decideSkippedRepository(
     const requestError = findGitHubRequestError(error);
     if (!requestError) return undefined;
 
-    let requestPath: string;
-    let repositoryPath: string;
-    try {
-        requestPath = new URL(requestError.url).pathname;
-        repositoryPath = new URL(`https://api.github.com${endpoint}`).pathname;
-    } catch {
-        return undefined;
-    }
-
-    let reasonCode: SkippedRepository['reasonCode'] | undefined;
-    let reason: string | undefined;
     if (
         requestError.status === 403 &&
         isTermsOfServiceBlock(requestError.data) &&
-        (requestPath === repositoryPath ||
-            requestPath.startsWith(`${repositoryPath}/`))
+        isRepositoryScopedRequest(requestError, endpoint, false)
     ) {
-        reasonCode = 'github_tos_block';
-        reason = 'GitHub blocked repository access for a Terms of Service restriction.';
-    } else if (
-        requestError.status === 404 &&
-        requestPath === repositoryPath
-    ) {
-        reasonCode = 'repository_unavailable_404';
-        reason = 'The repository detail endpoint returned HTTP 404 after discovery.';
+        return {
+            ...skippedRepositoryBase(requestError, candidate, university),
+            status: 403,
+            reasonCode: 'github_tos_block',
+            reason: describeSkippedRepositoryReason('github_tos_block'),
+        };
     }
-    if (!reasonCode || !reason) return undefined;
+    if (
+        requestError.status === 403 &&
+        requestError.blockReason === 'github_contributors_size_limit' &&
+        requestError.classification === 'permission' &&
+        requestError.accessReason === 'unknown-forbidden' &&
+        requestError.ssoStatus === undefined &&
+        requestError.rateLimit === undefined &&
+        isExactRepositoryEndpointRequest(
+            requestError,
+            `${endpoint}/contributors`,
+        )
+    ) {
+        return {
+            ...skippedRepositoryBase(requestError, candidate, university),
+            status: 403,
+            reasonCode: 'github_contributors_unavailable',
+            reason: describeSkippedRepositoryReason(
+                'github_contributors_unavailable',
+            ),
+        };
+    }
+    if (
+        requestError.status === 404 &&
+        isRepositoryScopedRequest(requestError, endpoint, true)
+    ) {
+        return {
+            ...skippedRepositoryBase(requestError, candidate, university),
+            status: 404,
+            reasonCode: 'repository_unavailable_404',
+            reason: describeSkippedRepositoryReason(
+                'repository_unavailable_404',
+            ),
+        };
+    }
+    if (
+        requestError.status === 451 &&
+        isRepositoryScopedRequest(requestError, endpoint, false)
+    ) {
+        return {
+            ...skippedRepositoryBase(requestError, candidate, university),
+            status: 451,
+            reasonCode: 'github_legal_restriction',
+            reason: describeSkippedRepositoryReason('github_legal_restriction'),
+        };
+    }
+    return undefined;
+}
 
+function skippedRepositoryBase(
+    requestError: GitHubRequestError,
+    candidate: RepositoryCandidate,
+    university: string,
+) {
     return {
         university,
         repositoryId: candidate.id,
         repositoryName: candidate.fullName,
         endpoint: sanitizeGitHubEndpoint(requestError.url),
-        status: requestError.status as 403 | 404,
-        reasonCode,
-        reason,
+        ...(requestError.requestId
+            ? { requestId: requestError.requestId }
+            : {}),
     };
 }
 
-function findGitHubRequestError(error: unknown): GitHubRequestError | undefined {
+/** Check both the original resource and the trusted effective redirect target. */
+function isRepositoryScopedRequest(
+    error: GitHubRequestError,
+    endpoint: string,
+    rootOnly: boolean,
+): boolean {
+    try {
+        const requestedUrl = new URL(error.requestedUrl);
+        const finalUrl = new URL(error.url);
+        if (
+            requestedUrl.protocol !== 'https:' ||
+            finalUrl.protocol !== 'https:' ||
+            requestedUrl.origin !== error.apiOrigin ||
+            finalUrl.origin !== error.apiOrigin
+        ) {
+            return false;
+        }
+        const rootPath = new URL(
+            `${error.apiOrigin}${error.apiBasePath}${endpoint}`,
+        ).pathname;
+        const requestedPath = requestedUrl.pathname;
+        if (
+            requestedPath !== rootPath &&
+            !requestedPath.startsWith(`${rootPath}/`)
+        ) {
+            return false;
+        }
+        if (rootOnly && requestedPath !== rootPath) return false;
+
+        const requestedSuffix = repositoryResourceSuffix(
+            requestedPath,
+            error.apiBasePath,
+        );
+        const finalSuffix = repositoryResourceSuffix(
+            finalUrl.pathname,
+            error.apiBasePath,
+        );
+        return requestedSuffix !== undefined && requestedSuffix === finalSuffix;
+    } catch {
+        return false;
+    }
+}
+
+/** Match only the candidate's exact contributors resource on both URLs. */
+function isExactRepositoryEndpointRequest(
+    error: GitHubRequestError,
+    endpoint: string,
+): boolean {
+    try {
+        const requestedUrl = new URL(error.requestedUrl);
+        const finalUrl = new URL(error.url);
+        const expectedPath = new URL(
+            `${error.apiOrigin}${error.apiBasePath}${endpoint}`,
+        ).pathname;
+        return [requestedUrl, finalUrl].every(
+            (url) =>
+                url.protocol === 'https:' &&
+                url.origin === error.apiOrigin &&
+                !url.username &&
+                !url.password &&
+                url.pathname === expectedPath,
+        );
+    } catch {
+        return false;
+    }
+}
+
+function repositoryResourceSuffix(
+    pathname: string,
+    apiBasePath: string,
+): string | undefined {
+    const basePath = apiBasePath.replace(/\/+$/, '');
+    let apiPath = pathname;
+    if (basePath) {
+        if (pathname !== basePath && !pathname.startsWith(`${basePath}/`)) {
+            return undefined;
+        }
+        apiPath = pathname.slice(basePath.length) || '/';
+    }
+    const match = apiPath.match(/^\/repos\/[^/]+\/[^/]+(\/.*)?$/);
+    return match ? (match[1] ?? '') : undefined;
+}
+
+function findGitHubRequestError(
+    error: unknown,
+): GitHubRequestError | undefined {
     const visited = new Set<unknown>();
     let current: unknown = error;
     while (current instanceof Error && !visited.has(current)) {
@@ -344,7 +531,7 @@ async function getContributors(
     const response = await paginateGitHub<unknown>(
         client,
         `${repositoryEndpointPath}/contributors`,
-        { query: { per_page: 100 } },
+        { query: { per_page: 100 }, allowNoContent: true },
     );
     const contributors: string[] = [];
     const seen = new Set<string>();
@@ -766,9 +953,7 @@ function repositoryPathFromContentsEndpoint(endpoint: string): string {
 
 function apiPathFromUrl(value: string): string {
     if (value.includes('\u0000')) {
-        throw new TypeError(
-            'GitHub community file has an invalid content URL',
-        );
+        throw new TypeError('GitHub community file has an invalid content URL');
     }
     let url: URL;
     try {

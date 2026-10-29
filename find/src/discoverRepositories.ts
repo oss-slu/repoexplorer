@@ -1,4 +1,4 @@
-import { allOrThrow, mapWithConcurrency } from './utils/concurrency';
+import { mapWithConcurrency } from './utils/concurrency';
 import { GitHubRequestClient, GitHubRequestError } from './utils/githubRequest';
 import {
     RepositoryRecordValidationError,
@@ -11,6 +11,7 @@ import type { ScrapingProgressCallback } from './types/progress';
 import type {
     OwnerListingPolicy,
     RepositoryCandidate,
+    ScrapingWarning,
     SkippedOwner,
     UniversityConfiguration,
 } from './types/scraping';
@@ -35,6 +36,10 @@ export type RepositoryDiscoveryOptions = {
     policy?: OwnerListingPolicy;
     university: string;
     elapsedMs?: () => number;
+    searchRetrySleep?: (
+        delayMs: number,
+        signal?: AbortSignal,
+    ) => Promise<void>;
 };
 
 export async function discoverRepositories(
@@ -81,64 +86,58 @@ export async function discoverRepositories(
             completedSearches += 1;
             report('search', completedSearches, 3, label);
         };
+        const searchTasks = [
+            {
+                endpoint: 'repositories',
+                query: queries.repositories,
+                kind: 'repository',
+                label: 'repositories',
+                detail: 'repository search',
+            },
+            {
+                endpoint: 'users',
+                query: queries.organizations,
+                kind: 'organization',
+                label: 'organizations',
+                detail: 'organization search',
+            },
+            {
+                endpoint: 'users',
+                query: queries.users,
+                kind: 'user',
+                label: 'users',
+                detail: 'user search',
+            },
+        ] as const;
         const [repositorySearch, organizationSearch, userSearch] =
-            await allOrThrow(
-                [
-                    searchGitHub<unknown>(
-                        client,
-                        'repositories',
-                        queries.repositories,
-                        'repository',
-                        { signal: controller.signal },
-                    )
-                        .then((value) => {
-                            searchDone('repositories');
-                            return value;
-                        })
-                        .catch((error: unknown) => {
-                            throw withScrapingContext(error, {
-                                phase: 'search',
+            await mapWithConcurrency(
+                searchTasks,
+                2,
+                async ({ endpoint, query, kind, label, detail }) => {
+                    try {
+                        const result = await searchGitHub<unknown>(
+                            client,
+                            endpoint,
+                            query,
+                            kind,
+                            {
+                                signal: controller.signal,
+                                onProgress: options.onProgress,
                                 university: options.university,
-                                detail: 'repository search',
-                            });
-                        }),
-                    searchGitHub<unknown>(
-                        client,
-                        'users',
-                        queries.organizations,
-                        'organization',
-                        { signal: controller.signal },
-                    )
-                        .then((value) => {
-                            searchDone('organizations');
-                            return value;
-                        })
-                        .catch((error: unknown) => {
-                            throw withScrapingContext(error, {
-                                phase: 'search',
-                                university: options.university,
-                                detail: 'organization search',
-                            });
-                        }),
-                    searchGitHub<unknown>(
-                        client,
-                        'users',
-                        queries.users,
-                        'user',
-                        { signal: controller.signal },
-                    )
-                        .then((value) => {
-                            searchDone('users');
-                            return value;
-                        })
-                        .catch((error: unknown) => {
-                            throw withScrapingContext(error, {
-                                phase: 'search',
-                                university: options.university,
-                                detail: 'user search',
-                            });
-                        }),
-                ] as const,
+                                elapsedMs: options.elapsedMs,
+                                sleep: options.searchRetrySleep,
+                            },
+                        );
+                        searchDone(label);
+                        return result;
+                    } catch (error) {
+                        throw withScrapingContext(error, {
+                            phase: 'search',
+                            university: options.university,
+                            detail,
+                        });
+                    }
+                },
                 (error) => {
                     options.onFatalError?.(error);
                     controller.abort(error);
@@ -229,7 +228,7 @@ export async function discoverRepositories(
 
         const byId = new Map<number, RepositoryCandidate>();
         for (const item of repositorySearch.items) {
-            const candidate = parseRepositoryCandidate(item);
+            const candidate = parseRepositoryCandidate(item, options.university);
             byId.set(candidate.id, candidate);
         }
         for (const candidate of ownerCandidates.flatMap(
@@ -285,7 +284,9 @@ async function listOwnerRepositories(
         signal,
     });
     try {
-        return response.data.map(parseRepositoryCandidate);
+        return response.data.map((value) =>
+            parseRepositoryCandidate(value, university),
+        );
     } catch (error) {
         throw withScrapingContext(error, {
             phase: 'owner listing',
@@ -314,7 +315,10 @@ function parseOwner(value: unknown, expectedKind: OwnerKind): DiscoveredOwner {
     return { login: value.login, kind: expectedKind };
 }
 
-function parseRepositoryCandidate(value: unknown): RepositoryCandidate {
+function parseRepositoryCandidate(
+    value: unknown,
+    university: string,
+): RepositoryCandidate {
     if (!isRecord(value)) {
         throw new TypeError(
             'GitHub repository search returned a non-object result',
@@ -343,7 +347,123 @@ function parseRepositoryCandidate(value: unknown): RepositoryCandidate {
             `GitHub repository ${value.id} has an invalid full_name`,
         );
     }
-    return { id: value.id, fullName: value.full_name };
+    const metadataWarnings: ScrapingWarning[] = [];
+    const repositoryMetadata =
+        Object.hasOwn(value, 'owner') && Object.hasOwn(value, 'private')
+            ? projectRepositoryMetadata(
+                  value,
+                  value.id,
+                  value.full_name,
+                  university,
+                  metadataWarnings,
+              )
+            : undefined;
+    return {
+        id: value.id,
+        fullName: value.full_name,
+        ...(repositoryMetadata ? { metadata: repositoryMetadata } : {}),
+        ...(metadataWarnings.length > 0 ? { metadataWarnings } : {}),
+    };
+}
+
+function projectRepositoryMetadata(
+    source: Record<string, unknown>,
+    repositoryId: number,
+    fullName: string,
+    university: string,
+    warnings: ScrapingWarning[],
+): Record<string, unknown> | undefined {
+    const ownerValue = source.owner;
+    const licenseValue = source.license;
+    const fields = [
+        'id',
+        'full_name',
+        'private',
+        'language',
+        'html_url',
+        'description',
+        'fork',
+        'created_at',
+        'updated_at',
+        'pushed_at',
+        'homepage',
+        'size',
+        'stargazers_count',
+        'watchers_count',
+        'forks_count',
+        'open_issues_count',
+        'subscribers_count',
+    ];
+    if (
+        fields.some(
+            (field) =>
+                field !== 'description' &&
+                typeof source[field] === 'string' &&
+                (source[field] as string).includes('\u0000'),
+        ) ||
+        (typeof ownerValue === 'string' &&
+            ownerValue.includes('\u0000')) ||
+        (isRecord(ownerValue) &&
+            ['login', 'type'].some(
+                (field) =>
+                    typeof ownerValue[field] === 'string' &&
+                    (ownerValue[field] as string).includes('\u0000'),
+            )) ||
+        (isRecord(licenseValue) &&
+            ['spdx_id', 'key'].some(
+                (field) =>
+                    typeof licenseValue[field] === 'string' &&
+                    (licenseValue[field] as string).includes('\u0000'),
+            )) ||
+        (typeof licenseValue === 'string' &&
+            licenseValue.includes('\u0000'))
+    ) {
+        return undefined;
+    }
+    const metadata: Record<string, unknown> = {};
+    for (const field of fields) {
+        if (!Object.hasOwn(source, field)) continue;
+        const value = source[field];
+        if (field === 'description' && typeof value === 'string') {
+            const replacementCount = value.split('\u0000').length - 1;
+            metadata.description = value.replaceAll('\u0000', '\uFFFD');
+            if (replacementCount > 0) {
+                warnings.push({
+                    university,
+                    repositoryId,
+                    repositoryName: fullName,
+                    field: 'description',
+                    replacementCount,
+                    code: 'nul_replaced',
+                });
+            }
+        } else {
+            metadata[field] = value;
+        }
+    }
+    if (isRecord(ownerValue)) {
+        metadata.owner = {
+            login: ownerValue.login,
+            type: ownerValue.type,
+        };
+    } else if (Object.hasOwn(source, 'owner')) {
+        metadata.owner = ownerValue;
+    }
+    if (licenseValue === null) {
+        metadata.license = null;
+    } else if (isRecord(licenseValue)) {
+        metadata.license = {
+            ...(Object.hasOwn(licenseValue, 'spdx_id')
+                ? { spdx_id: licenseValue.spdx_id }
+                : {}),
+            ...(Object.hasOwn(licenseValue, 'key')
+                ? { key: licenseValue.key }
+                : {}),
+        };
+    } else if (Object.hasOwn(source, 'license')) {
+        metadata.license = licenseValue;
+    }
+    return metadata;
 }
 
 function findGitHubRequestError(error: unknown): GitHubRequestError | undefined {

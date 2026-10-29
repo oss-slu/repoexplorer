@@ -75,7 +75,12 @@ export class CliProgressRenderer {
     private update(event: ScrapingProgressEvent): void {
         if (this.closed) return;
         this.elapsedMs = event.elapsedMs;
-        if (event.type === 'phase') {
+        if (event.type === 'search-retry') {
+            this.clearForOutput();
+            this.options.stdout.write(
+                `${sanitize(event.university ?? 'GitHub')}: retrying ${event.searchKind} search after ${sanitize(event.reason)} (attempt ${event.attempt}/${event.totalAttempts})\n`,
+            );
+        } else if (event.type === 'phase') {
             this.current = {
                 phase: event.phase,
                 university: event.university,

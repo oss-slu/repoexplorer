@@ -4,6 +4,7 @@ import path from 'node:path';
 import type {
     ScrapingPolicy,
     ScrapeUniversityOutcome,
+    ScrapeUniversityInterruption,
     ScrapingRunResult,
     SkippedOwner,
     SkippedRepository,
@@ -15,9 +16,10 @@ import {
     sanitizeGitHubEndpoint,
     type ScrapingDiagnostic,
 } from './scrapingDiagnostics';
+import { describeSkippedRepositoryReason } from './scrapingError';
 
 export type ScrapingReport = {
-    schemaVersion: 2;
+    schemaVersion: 3;
     startedAt: string;
     finishedAt: string;
     policy: ScrapingPolicy;
@@ -26,6 +28,7 @@ export type ScrapingReport = {
         completeUniversities: number;
         partialUniversities: number;
         failedUniversities: number;
+        interruptedUniversities: number;
         notRunUniversities: number;
         committedAssociations: number;
         skippedOwners: number;
@@ -82,6 +85,21 @@ export function createScrapingReport(input: {
             };
         }
 
+        if (outcome.status === 'interrupted') {
+            return {
+                university: clean(outcome.university),
+                status: outcome.status,
+                discoveredRepositories: outcome.discovered,
+                committedAssociations: 0,
+                skippedOwners: sanitizeSkippedOwners(outcome.skippedOwners),
+                skippedRepositories: sanitizeSkippedRepositories(
+                    outcome.skippedRepositories,
+                ),
+                warnings: sanitizeWarnings(outcome.warnings),
+                diagnostics: interruptionDiagnostic(outcome),
+            };
+        }
+
         return {
             university: clean(outcome.university),
             status: outcome.status,
@@ -105,7 +123,7 @@ export function createScrapingReport(input: {
     const warnings = universities.flatMap((university) => university.warnings);
 
     return {
-        schemaVersion: 2,
+        schemaVersion: 3,
         startedAt: input.startedAt.toISOString(),
         finishedAt: input.finishedAt.toISOString(),
         policy: input.policy,
@@ -120,6 +138,9 @@ export function createScrapingReport(input: {
             failedUniversities: universities.filter(
                 (university) => university.status === 'failed',
             ).length,
+            interruptedUniversities: universities.filter(
+                (university) => university.status === 'interrupted',
+            ).length,
             notRunUniversities: universities.filter(
                 (university) => university.status === 'not_run',
             ).length,
@@ -133,6 +154,20 @@ export function createScrapingReport(input: {
             ),
         },
         universities,
+    };
+}
+
+function interruptionDiagnostic(
+    outcome: ScrapeUniversityInterruption,
+): ScrapingDiagnostic {
+    return {
+        category: 'interrupted',
+        cancellationSource: outcome.cancellationSource,
+        university: clean(outcome.university),
+        ...(outcome.phase ? { phase: outcome.phase } : {}),
+        ...(outcome.owner ? { owner: clean(outcome.owner) } : {}),
+        ...(outcome.repository ? { repository: clean(outcome.repository) } : {}),
+        ...(outcome.detail ? { detail: clean(outcome.detail) } : {}),
     };
 }
 
@@ -162,7 +197,9 @@ export async function writeScrapingReport(
     }
 }
 
-function sanitizeSkippedOwners(owners: readonly SkippedOwner[]): SkippedOwner[] {
+function sanitizeSkippedOwners(
+    owners: readonly SkippedOwner[],
+): SkippedOwner[] {
     return owners.map((owner) => ({
         university: clean(owner.university),
         login: clean(owner.login),
@@ -176,18 +213,55 @@ function sanitizeSkippedOwners(owners: readonly SkippedOwner[]): SkippedOwner[] 
 function sanitizeSkippedRepositories(
     repositories: readonly SkippedRepository[],
 ): SkippedRepository[] {
-    return repositories.map((repository) => ({
-        university: clean(repository.university),
-        repositoryId: repository.repositoryId,
-        repositoryName: clean(repository.repositoryName),
-        endpoint: sanitizeGitHubEndpoint(repository.endpoint),
-        status: repository.status,
-        reasonCode: repository.reasonCode,
-        reason:
-            repository.reasonCode === 'github_tos_block'
-                ? 'GitHub blocked repository access for a Terms of Service restriction.'
-                : 'The repository detail endpoint returned HTTP 404 after discovery.',
-    }));
+    return repositories.map((repository) => {
+        const sanitized = {
+            university: clean(repository.university),
+            repositoryId: repository.repositoryId,
+            repositoryName: clean(repository.repositoryName),
+            endpoint: sanitizeGitHubEndpoint(repository.endpoint),
+            ...(repository.requestId
+                ? { requestId: clean(repository.requestId) }
+                : {}),
+        };
+        switch (repository.reasonCode) {
+            case 'github_tos_block':
+                return {
+                    ...sanitized,
+                    status: 403,
+                    reasonCode: repository.reasonCode,
+                    reason: describeSkippedRepositoryReason(
+                        repository.reasonCode,
+                    ),
+                };
+            case 'github_contributors_unavailable':
+                return {
+                    ...sanitized,
+                    status: 403,
+                    reasonCode: repository.reasonCode,
+                    reason: describeSkippedRepositoryReason(
+                        repository.reasonCode,
+                    ),
+                };
+            case 'repository_unavailable_404':
+                return {
+                    ...sanitized,
+                    status: 404,
+                    reasonCode: repository.reasonCode,
+                    reason: describeSkippedRepositoryReason(
+                        repository.reasonCode,
+                    ),
+                };
+            case 'github_legal_restriction':
+                return {
+                    ...sanitized,
+                    status: 451,
+                    reasonCode: repository.reasonCode,
+                    reason: describeSkippedRepositoryReason(
+                        repository.reasonCode,
+                    ),
+                };
+        }
+    });
 }
 
 function sanitizeWarnings(

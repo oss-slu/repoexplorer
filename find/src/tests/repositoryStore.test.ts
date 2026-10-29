@@ -5,6 +5,7 @@ import {
     REQUIRED_REPOSITORY_SCRAPING_COLUMNS,
 } from '../db/repositoryStore';
 import type { RepositoryScrapingRecord } from '../types/scraping';
+import { ScrapingCancellationError } from '../utils/scrapingError';
 
 describe('RepositoryStore input validation', () => {
     test('rejects unsafe counts and contributor text before opening a connection', async () => {
@@ -80,6 +81,17 @@ describe('RepositoryStore read-only preflight', () => {
                         can_insert: options.canInsert ?? true,
                         can_update: true,
                         can_delete: true,
+                        cache_select: true,
+                        cache_insert: true,
+                        cache_update: true,
+                        cache_delete: true,
+                        runs_select: true,
+                        runs_insert: true,
+                        runs_update: true,
+                        checkpoints_select: true,
+                        checkpoints_insert: true,
+                        checkpoints_update: true,
+                        checkpoints_delete: true,
                     },
                 ],
             };
@@ -95,7 +107,7 @@ describe('RepositoryStore read-only preflight', () => {
     test('checks the table, all insert columns, and CRUD privileges without writes', async () => {
         const mock = createPreflightPool();
         await new RepositoryStore(mock.pool).preflight();
-        expect(mock.statements).toHaveLength(4);
+        expect(mock.statements).toHaveLength(5);
         expect(mock.statements.every((statement) => /^\s*SELECT\b/i.test(statement))).toBe(true);
         expect(mock.release).toHaveBeenCalledTimes(1);
     });
@@ -125,6 +137,92 @@ describe('RepositoryStore read-only preflight', () => {
             failure: 'connection',
             sqlState: '08006',
         });
+    });
+});
+
+describe('RepositoryStore publication cancellation', () => {
+    function createPublicationPool(
+        afterQuery: (query: string) => void,
+    ) {
+        const statements: string[] = [];
+        const release = jest.fn();
+        const query = jest.fn(async (sql: string) => {
+            statements.push(sql);
+            afterQuery(sql);
+            if (sql.includes('SELECT mode, status, candidate_count')) {
+                return {
+                    rows: [
+                        {
+                            mode: 'full',
+                            status: 'ready',
+                            candidate_count: 1,
+                            skipped_owners: [],
+                        },
+                    ],
+                };
+            }
+            if (sql.includes('SELECT repository_id::TEXT')) {
+                return {
+                    rows: [
+                        {
+                            repository_id: '123',
+                            status: 'complete',
+                            record: record(),
+                            etag: null,
+                            skipped_repository: null,
+                            warnings: [],
+                        },
+                    ],
+                };
+            }
+            return { rows: [], rowCount: 1 };
+        });
+        const pool = {
+            async connect() {
+                return { query, release };
+            },
+        } as unknown as Pool;
+        return { pool, statements, release };
+    }
+
+    test('rolls back before commit and releases the client when cancellation arrives during publication', async () => {
+        const controller = new AbortController();
+        const mock = createPublicationPool((sql) => {
+            if (sql.includes("SET status = 'complete'")) {
+                controller.abort(new ScrapingCancellationError('SIGINT'));
+            }
+        });
+
+        await expect(
+            new RepositoryStore(mock.pool, 1).publishUniversityCollection(
+                'run',
+                'University',
+                controller.signal,
+            ),
+        ).rejects.toMatchObject({ name: 'ScrapingCancellationError', source: 'SIGINT' });
+        expect(mock.statements).toContain('ROLLBACK');
+        expect(mock.statements).not.toContain('COMMIT');
+        expect(mock.release).toHaveBeenCalledTimes(1);
+    });
+
+    test('reports a successful commit when cancellation arrives after PostgreSQL commits', async () => {
+        const controller = new AbortController();
+        const mock = createPublicationPool((sql) => {
+            if (sql === 'COMMIT') {
+                controller.abort(new ScrapingCancellationError('SIGTERM'));
+            }
+        });
+
+        await expect(
+            new RepositoryStore(mock.pool, 1).publishUniversityCollection(
+                'run',
+                'University',
+                controller.signal,
+            ),
+        ).resolves.toBe(1);
+        expect(mock.statements).toContain('COMMIT');
+        expect(mock.statements).not.toContain('ROLLBACK');
+        expect(mock.release).toHaveBeenCalledTimes(1);
     });
 });
 

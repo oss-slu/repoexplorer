@@ -1,3 +1,7 @@
+import type { ScrapingPhase } from './progress';
+
+export type ScrapingCancellationSource = 'SIGINT' | 'SIGTERM' | 'caller';
+
 export type SearchQueries = {
     repositories?: string;
     organizations?: string;
@@ -19,6 +23,8 @@ export type ScrapingConfiguration = {
 
 export type ScrapingPolicy = 'best-effort' | 'strict';
 
+export type CollectionMode = 'full' | 'refresh';
+
 /** Kept as an alias for callers that used the original owner-only policy name. */
 export type OwnerListingPolicy = ScrapingPolicy;
 
@@ -31,15 +37,32 @@ export type SkippedOwner = {
     reason: string;
 };
 
-export type SkippedRepository = {
+type SkippedRepositoryBase = {
     university: string;
     repositoryId: number;
     repositoryName: string;
     endpoint: string;
-    status: 403 | 404;
-    reasonCode: 'github_tos_block' | 'repository_unavailable_404';
+    requestId?: string;
     reason: string;
 };
+
+export type SkippedRepository =
+    | (SkippedRepositoryBase & {
+          status: 403;
+          reasonCode: 'github_tos_block';
+      })
+    | (SkippedRepositoryBase & {
+          status: 403;
+          reasonCode: 'github_contributors_unavailable';
+      })
+    | (SkippedRepositoryBase & {
+          status: 404;
+          reasonCode: 'repository_unavailable_404';
+      })
+    | (SkippedRepositoryBase & {
+          status: 451;
+          reasonCode: 'github_legal_restriction';
+      });
 
 export type ScrapingWarning = {
     university: string;
@@ -53,6 +76,32 @@ export type ScrapingWarning = {
 export type RepositoryCandidate = {
     id: number;
     fullName: string;
+    /** Repository fields projected from search or owner listing metadata, when available. */
+    metadata?: unknown;
+    /** Descriptive-text normalization warnings collected before checkpointing metadata. */
+    metadataWarnings?: ScrapingWarning[];
+    /** Stored entity tag used only by conditional refresh requests. */
+    etag?: string;
+};
+
+export type RepositoryCollectionCheckpoint = {
+    candidate: RepositoryCandidate;
+    status: 'pending' | 'complete' | 'unchanged' | 'skipped';
+    record?: RepositoryScrapingRecord;
+    skippedRepository?: SkippedRepository;
+    etag?: string;
+    warnings?: ScrapingWarning[];
+};
+
+export type UniversityCollectionCheckpoint = {
+    mode: CollectionMode;
+    status: 'discovering' | 'ready' | 'complete';
+    discovered: number;
+    committed: number;
+    candidates: RepositoryCollectionCheckpoint[];
+    skippedOwners: SkippedOwner[];
+    skippedRepositories: SkippedRepository[];
+    warnings: ScrapingWarning[];
 };
 
 /**
@@ -116,9 +165,24 @@ export type ScrapeUniversityFailure = {
     warnings: ScrapingWarning[];
 };
 
+export type ScrapeUniversityInterruption = {
+    status: 'interrupted';
+    university: string;
+    discovered?: number;
+    cancellationSource: ScrapingCancellationSource;
+    phase?: ScrapingPhase;
+    owner?: string;
+    repository?: string;
+    detail?: string;
+    skippedOwners: SkippedOwner[];
+    skippedRepositories: SkippedRepository[];
+    warnings: ScrapingWarning[];
+};
+
 export type ScrapeUniversityOutcome =
     | ScrapeUniversityResult
     | ScrapeUniversityFailure
+    | ScrapeUniversityInterruption
     | { status: 'not_run'; university: string };
 
 export type ScrapingRunResult = {
@@ -126,6 +190,7 @@ export type ScrapingRunResult = {
     universitiesProcessed: number;
     committed: number;
     failed: number;
+    interrupted: number;
     partial: number;
     results: ScrapeUniversityResult[];
     failures: ScrapeUniversityFailure[];

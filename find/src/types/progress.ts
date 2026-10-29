@@ -3,6 +3,15 @@ export type ScrapingPhase =
 
 export type ScrapingProgressEvent =
     | {
+          type: 'search-retry';
+          searchKind: 'repository' | 'organization' | 'user';
+          reason: string;
+          attempt: number;
+          totalAttempts: number;
+          university?: string;
+          elapsedMs: number;
+      }
+    | {
           type: 'phase';
           phase: ScrapingPhase;
           university: string;

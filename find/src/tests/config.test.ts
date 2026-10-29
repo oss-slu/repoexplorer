@@ -61,10 +61,31 @@ describe('scraping configuration', () => {
             configPath: 'sample.json',
             verbose: true,
             policy: 'best-effort',
+            mode: 'full',
         });
         expect(parseCliOptions(['--verbose']).verbose).toBe(true);
         expect(parseCliOptions([]).policy).toBe('best-effort');
         expect(parseCliOptions(['--strict']).policy).toBe('strict');
+        expect(parseCliOptions(['--mode', 'refresh'])).toMatchObject({
+            mode: 'refresh',
+        });
+        expect(
+            parseCliOptions([
+                '--mode',
+                'full',
+                '--university',
+                'Saint Louis University',
+                '--run-id',
+                'manual-123',
+            ]),
+        ).toMatchObject({
+            mode: 'full',
+            university: 'Saint Louis University',
+            runId: 'manual-123',
+        });
+        expect(() => parseCliOptions(['--mode', 'unknown'])).toThrow(
+            /either full or refresh/,
+        );
     });
 
     test('rejects actual NUL in university keys and search strings', () => {
