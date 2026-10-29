@@ -91,6 +91,67 @@ integrationDescribe('RepositoryStore PostgreSQL integration', () => {
         }
     });
 
+    test('collection locks allow disjoint selections and clean up failed overlapping selections', async () => {
+        const otherPool = new Pool({ connectionString: databaseUrl, max: 1 });
+        const other = new RepositoryStore(otherPool, 1);
+        const releases: Array<() => Promise<void>> = [];
+        const a = `${testPrefix}-lock-a`;
+        const b = `${testPrefix}-lock-b`;
+        try {
+            const releaseB = await store.acquireCollectionLock([b, b]);
+            releases.push(releaseB);
+            const releaseA = await other.acquireCollectionLock([a]);
+            releases.push(releaseA);
+            await releaseA();
+            // A is acquired before B conflicts; the failed attempt must release A.
+            await expect(other.acquireCollectionLock([a, b])).rejects.toThrow(
+                'selected university',
+            );
+            await releaseB();
+            await releaseB(); // Cleanup is idempotent, including duplicate keys.
+            const releaseBoth = await store.acquireCollectionLock([b, a]);
+            releases.push(releaseBoth);
+            await expect(other.acquireCollectionLock([a])).rejects.toThrow(
+                'selected university',
+            );
+            await releaseBoth();
+            releases.push(await other.acquireCollectionLock([a, b]));
+        } finally {
+            for (const release of releases.reverse()) await release();
+            await otherPool.end();
+        }
+    });
+
+    test('collection locks exclude legacy collectors in both directions', async () => {
+        const legacyPool = new Pool({ connectionString: databaseUrl, max: 1 });
+        const legacy = await legacyPool.connect();
+        let release: (() => Promise<void>) | undefined;
+        try {
+            await legacy.query('SELECT pg_advisory_lock(731947, 83)');
+            await expect(
+                store.acquireCollectionLock([`${testPrefix}-legacy`]),
+            ).rejects.toThrow('legacy database-wide lock');
+            await legacy.query('SELECT pg_advisory_unlock_all()');
+            release = await store.acquireCollectionLock([
+                `${testPrefix}-legacy`,
+            ]);
+            const blocked = await legacy.query<{ acquired: boolean }>(
+                'SELECT pg_try_advisory_lock(731947, 83) AS acquired',
+            );
+            expect(blocked.rows[0].acquired).toBe(false);
+            await release();
+            const acquired = await legacy.query<{ acquired: boolean }>(
+                'SELECT pg_try_advisory_lock(731947, 83) AS acquired',
+            );
+            expect(acquired.rows[0].acquired).toBe(true);
+        } finally {
+            await release?.();
+            await legacy.query('SELECT pg_advisory_unlock_all()');
+            legacy.release();
+            await legacyPool.end();
+        }
+    });
+
     test('inserts and reruns by identity, updates scrape fields, and preserves analysis fields', async () => {
         const university = `${testPrefix}-rerun`;
         const first = record(university, 8_765_432_101, {

@@ -560,31 +560,60 @@ export class RepositoryStore implements RepositoryCollectionStorePort {
         }
     }
 
-    async acquireCollectionLock(): Promise<() => Promise<void>> {
-        const client = await this.pool.connect();
-        try {
-            const result = await client.query<{ acquired: boolean }>(
-                'SELECT pg_try_advisory_lock(731947, 83) AS acquired',
+    async acquireCollectionLock(
+        universities: readonly string[],
+    ): Promise<() => Promise<void>> {
+        if (
+            universities.length === 0 ||
+            universities.some((key) => !key.trim())
+        ) {
+            throw new TypeError(
+                'Collection locks require nonempty university keys',
             );
-            if (!result.rows[0]?.acquired) {
-                throw new Error(
-                    'Another repository collection is already running against this database',
-                );
-            }
-        } catch (error) {
-            client.release();
-            throw error;
         }
+        const client = await this.pool.connect();
         let released = false;
-        return async () => {
+        // This checked-out connection is used only for collection locks.
+        const release = async () => {
             if (released) return;
             released = true;
             try {
-                await client.query('SELECT pg_advisory_unlock(731947, 83)');
-            } finally {
-                client.release();
+                await client.query('SELECT pg_advisory_unlock_all()');
+            } catch (error) {
+                client.release(true);
+                throw error;
             }
+            client.release();
         };
+        try {
+            // Coexist with new collectors, but exclude older binaries that take
+            // the former database-wide exclusive lock during a rolling upgrade.
+            const legacy = await client.query<{ acquired: boolean }>(
+                'SELECT pg_try_advisory_lock_shared(731947, 83) AS acquired',
+            );
+            if (!legacy.rows[0]?.acquired) {
+                throw new Error(
+                    'Another repository collection using the legacy database-wide lock is already running against this database',
+                );
+            }
+            // Acquire the entire selected set before any checkpoint writes.
+            // Bigint locks occupy a separate key space from the legacy pair.
+            for (const university of [...new Set(universities)].sort()) {
+                const result = await client.query<{ acquired: boolean }>(
+                    'SELECT pg_try_advisory_lock(hashtextextended($1::text, 731948)) AS acquired',
+                    [university],
+                );
+                if (!result.rows[0]?.acquired) {
+                    throw new Error(
+                        'Another repository collection is already running for a selected university against this database',
+                    );
+                }
+            }
+        } catch (error) {
+            await release();
+            throw error;
+        }
+        return release;
     }
 
     async upsertUniversity(

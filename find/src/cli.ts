@@ -74,7 +74,7 @@ export interface CliRuntimeDependencies {
 export interface CliCollectionRuntime {
     store: RepositoryCollectionStorePort & {
         preflight(): Promise<void>;
-        acquireCollectionLock(): Promise<() => Promise<void>>;
+        acquireCollectionLock(universities: readonly string[]): Promise<() => Promise<void>>;
     };
     close(): Promise<void>;
 }
@@ -280,7 +280,9 @@ export async function runCli(
         const result = await withDatabasePreflight(
             async () => {
                 await store.preflight();
-                releaseCollectionLock = await store.acquireCollectionLock();
+                releaseCollectionLock = await store.acquireCollectionLock(
+                    configuration.universities.map((university) => university.key),
+                );
             },
             () =>
                 runCollection(configuration, {

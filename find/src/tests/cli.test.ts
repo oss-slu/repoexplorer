@@ -557,7 +557,8 @@ test.each([
         const runtime: CliCollectionRuntime = {
             store: {
                 async preflight() {},
-                async acquireCollectionLock() {
+                async acquireCollectionLock(universities) {
+                    expect(universities).toEqual(['University One']);
                     return async () => {
                         releasedLock = true;
                     };
@@ -593,12 +594,17 @@ test.each([
                         fullName: 'University One',
                         acronym: 'U1',
                     },
+                    {
+                        key: 'University Two',
+                        fullName: 'University Two',
+                        acronym: 'U2',
+                    },
                 ],
             }),
         );
 
         try {
-            const exitCodePromise = runCli(['--config', configPath], {
+            const exitCodePromise = runCli(['--config', configPath, '--university', 'University One'], {
                 stdout: output.stream,
                 stderr: errors.stream,
                 reportDirectory,
