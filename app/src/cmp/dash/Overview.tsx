@@ -115,6 +115,9 @@ export default function Overview({ filters }: OverviewProps) {
                     title="Community Files Presence"
                     endpoint="overview/communityFilesPresence"
                     filters={filters}
+                    xLabel="Feature"
+                    yLabel="Percent of Repositories"
+                    valueSuffix="%"
                 />
                 <PieChartDiv
                     title="Language Distribution"
@@ -131,12 +134,16 @@ export default function Overview({ filters }: OverviewProps) {
                     endpoint="overview/languageDistributionByType"
                     stacked
                     filters={filters}
+                    xLabel="Language"
+                    yLabel="Share of Repositories"
                 />
                 <BarChartDiv
                     title="License Distribution by Type"
                     endpoint="overview/licenseDistributionByType"
                     stacked
                     filters={filters}
+                    xLabel="License"
+                    yLabel="Share of Repositories"
                 />
             </div>
         </div>

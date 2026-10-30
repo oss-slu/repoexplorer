@@ -3,6 +3,8 @@ import {
     Bar,
     BarChart,
     CartesianGrid,
+    Cell,
+    LabelList,
     Legend,
     ResponsiveContainer,
     Tooltip,
@@ -20,6 +22,9 @@ export default function BarChartDiv({
     horizontal = false,
     seriesKeys,
     seriesLabels,
+    xLabel,
+    yLabel,
+    valueSuffix = '',
     filters = {},
 }: chartProps & {
     filters?: Record<string, string[] | number>;
@@ -102,6 +107,9 @@ export default function BarChartDiv({
         : ['value'];
     const labels = (seriesLabels ?? keys).map(formatLabel);
 
+    const formatValue = (v: unknown) =>
+        typeof v === 'number' ? `${v.toFixed(1)}${valueSuffix}` : String(v);
+
     return (
         <div
             style={{
@@ -116,32 +124,91 @@ export default function BarChartDiv({
             }}
         >
             <h2>{title}</h2>
-            <ResponsiveContainer width="100%" height={400}>
+            <ResponsiveContainer width="100%" height={460}>
                 <BarChart
                     data={data}
                     layout={horizontal ? 'vertical' : 'horizontal'}
+                    margin={{
+                        top: 20,
+                        right: 50,
+                        left: 30,
+                        bottom: horizontal ? 30 : 100,
+                    }}
                 >
                     <CartesianGrid strokeDasharray="3 3" />
                     {horizontal ? (
                         <>
-                            <XAxis type="number" allowDecimals={false} />
+                            <XAxis
+                                type="number"
+                                label={
+                                    xLabel
+                                        ? {
+                                              value: xLabel,
+                                              position: 'insideBottom',
+                                              offset: -15,
+                                          }
+                                        : undefined
+                                }
+                            />
                             <YAxis
                                 dataKey="name"
                                 type="category"
-                                width={120}
+                                width={140}
                                 tickFormatter={formatLabel}
+                                label={
+                                    yLabel
+                                        ? {
+                                              value: yLabel,
+                                              angle: -90,
+                                              position: 'insideLeft',
+                                              style: { textAnchor: 'middle' },
+                                          }
+                                        : undefined
+                                }
                             />
                         </>
                     ) : (
                         <>
-                            <XAxis dataKey="name" tickFormatter={formatLabel} />
-                            <YAxis type="number" allowDecimals={false} />
+                            <XAxis
+                                dataKey="name"
+                                tickFormatter={formatLabel}
+                                angle={-45}
+                                textAnchor="end"
+                                interval={0}
+                                height={100}
+                                label={
+                                    xLabel
+                                        ? {
+                                              value: xLabel,
+                                              position: 'insideBottom',
+                                              offset: -60,
+                                          }
+                                        : undefined
+                                }
+                            />
+                            <YAxis
+                                type="number"
+                                tickFormatter={(v) => `${v}${valueSuffix}`}
+                                label={
+                                    yLabel
+                                        ? {
+                                              value: yLabel,
+                                              angle: -90,
+                                              position: 'insideLeft',
+                                              style: { textAnchor: 'middle' },
+                                          }
+                                        : undefined
+                                }
+                            />
                         </>
                     )}
                     <Tooltip
                         labelFormatter={(label) => formatLabel(String(label))}
+                        formatter={formatValue}
                     />
-                    {keys.length > 1 && <Legend />}
+                    {keys.length > 1 && (
+                        <Legend wrapperStyle={{ paddingTop: 20 }} />
+                    )}
                     {keys.map((key, i) => (
                         <Bar
                             key={key}
@@ -149,7 +216,25 @@ export default function BarChartDiv({
                             name={labels[i] ?? key}
                             fill={PIE_COLORS[i % PIE_COLORS.length]}
                             stackId={stacked ? 'stack' : undefined}
-                        />
+                            isAnimationActive={false}
+                        >
+                            {!stacked &&
+                                data.map((_, j) => (
+                                    <Cell
+                                        key={j}
+                                        fill={PIE_COLORS[j % PIE_COLORS.length]}
+                                    />
+                                ))}
+                            {!stacked && (
+                                <LabelList
+                                    dataKey={key}
+                                    position={horizontal ? 'right' : 'top'}
+                                    offset={8}
+                                    style={{ fontSize: 12 }}
+                                    formatter={formatValue}
+                                />
+                            )}
+                        </Bar>
                     ))}
                 </BarChart>
             </ResponsiveContainer>

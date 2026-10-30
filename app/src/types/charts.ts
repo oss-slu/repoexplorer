@@ -11,8 +11,10 @@ export type chartProps = {
     seriesKeys?: string[];
     seriesLabels?: string[];
     maxRows?: number;
+    xLabel?: string;
+    yLabel?: string;
+    valueSuffix?: string;
 };
-
 export type barDatum = {
     name: string;
     [key: string]: string | number;

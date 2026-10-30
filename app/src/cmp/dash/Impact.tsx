@@ -118,21 +118,29 @@ export default function Impact({ filters }: ImpactProps) {
                     title="Stars Distribution"
                     endpoint="impact/starsDistribution"
                     filters={filters}
+                    yLabel="Repository Count"
+                    xLabel="Stars"
                 />
                 <BarChartDiv
                     title="Forks Distribution"
                     endpoint="impact/forksDistribution"
                     filters={filters}
+                    yLabel="Repository Count"
+                    xLabel="Forks"
                 />
                 <BarChartDiv
                     title="Release Downloads Distribution"
                     endpoint="impact/releaseDownloadsDistribution"
                     filters={filters}
+                    yLabel="Repository Count"
+                    xLabel="Downloads"
                 />
                 <BarChartDiv
                     title="Contributors Distribution"
                     endpoint="impact/contributorsDistribution"
                     filters={filters}
+                    yLabel="Repository Count"
+                    xLabel="Contributors"
                 />
             </div>
         </div>
