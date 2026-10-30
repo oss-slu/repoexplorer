@@ -135,6 +135,8 @@ export default function Sustainability({ filters }: SustainabilityProps) {
                     stacked
                     seriesKeys={['DEV', 'DOCS', 'EDU', 'WEB']}
                     filters={filters}
+                    xLabel="File"
+                    yLabel="Share of Repositories"
                 />
                 <div className="community-files-stars dashboard-table-col">
                     <h2>Community Files by # Stars</h2>
@@ -182,12 +184,16 @@ export default function Sustainability({ filters }: SustainabilityProps) {
                     title="Bus Factor Distribution"
                     endpoint="sustainability/busFactorDistribution"
                     filters={filters}
+                    xLabel="Bus Factor"
+                    yLabel="Repository Count"
                 />
 
                 <BarChartDiv
                     title="Contributor Count Distribution"
                     endpoint="sustainability/contributorCountDistribution"
                     filters={filters}
+                    xLabel="Contributors"
+                    yLabel="Repository Count"
                 />
             </div>
         </div>
