@@ -19,6 +19,127 @@ function repository(id: number, fullName = `owner/repo-${id}`) {
 }
 
 describe('discoverRepositories', () => {
+    test('retries one transient search without cancelling healthy sibling searches', async () => {
+        const searches = new Map<string, number>();
+        const fatalErrors: unknown[] = [];
+        const configuredUniversity: UniversityConfiguration = {
+            ...university,
+            queries: {
+                repositories: 'repository-query',
+                organizations: 'organization-query',
+                users: 'user-query',
+            },
+        };
+        const client = createTestClient((url) => {
+            if (url.pathname === '/search/repositories') {
+                return jsonResponse(
+                    searchEnvelope([repository(1)], 1),
+                );
+            }
+            if (url.pathname === '/search/users') {
+                const query = url.searchParams.get('q') ?? '';
+                searches.set(query, (searches.get(query) ?? 0) + 1);
+                if (query === 'organization-query') {
+                    const attempt = searches.get(query)!;
+                    return jsonResponse(
+                        searchEnvelope([], 0, attempt === 1),
+                    );
+                }
+                if (query === 'user-query') {
+                    return jsonResponse(searchEnvelope([]));
+                }
+            }
+            throw new Error(`Unexpected request: ${url}`);
+        }, 0, 1);
+        const result = await discoverRepositories(
+            client,
+            configuredUniversity,
+            2,
+            {
+                university: university.key,
+                onFatalError: (error) => fatalErrors.push(error),
+                searchRetrySleep: async () => {},
+            },
+        );
+
+        expect(result.candidates).toEqual([
+            expect.objectContaining({ id: 1, fullName: 'owner/repo-1' }),
+        ]);
+        expect(searches.get('organization-query')).toBe(2);
+        expect(searches.get('user-query')).toBe(1);
+        expect(fatalErrors).toHaveLength(0);
+    });
+
+    test('terminal search metadata failure cancels queued sibling requests', async () => {
+        const fetchedQueries: string[] = [];
+        const configuredUniversity: UniversityConfiguration = {
+            ...university,
+            queries: {
+                repositories: 'repository-query',
+                organizations: 'organization-query',
+                users: 'user-query',
+            },
+        };
+        let repositorySignal: AbortSignal | undefined;
+        const client = createTestClient((url, init) => {
+            const query = url.searchParams.get('q') ?? '';
+            fetchedQueries.push(query);
+            if (query === 'repository-query') {
+                repositorySignal = init.signal ?? undefined;
+                return new Promise<Response>((_resolve, reject) => {
+                    repositorySignal?.addEventListener(
+                        'abort',
+                        () => reject(repositorySignal?.reason),
+                        { once: true },
+                    );
+                });
+            }
+            if (query === 'organization-query') {
+                return jsonResponse({ items: [], total_count: 0 });
+            }
+            return jsonResponse(searchEnvelope([]));
+        }, 0, 2);
+
+        await expect(
+            discoverRepositories(client, configuredUniversity, 2, {
+                university: university.key,
+                searchRetrySleep: async () => {},
+            }),
+        ).rejects.toMatchObject({
+            cause: expect.objectContaining({
+                name: 'GitHubSearchError',
+                reason: 'invalid-search-metadata',
+            }),
+        });
+        expect(fetchedQueries).toContain('organization-query');
+        expect(repositorySignal?.aborted).toBe(true);
+        expect(fetchedQueries).not.toContain('user-query');
+    });
+
+    test('rejects an identity containing an actual NUL before enrichment', async () => {
+        const client = createTestClient((url) => {
+            if (url.pathname === '/search/repositories') {
+                return jsonResponse(
+                    searchEnvelope([repository(42, 'owner/bad\u0000name')]),
+                );
+            }
+            if (url.pathname === '/search/users') {
+                return jsonResponse(searchEnvelope([]));
+            }
+            throw new Error(`Unexpected request: ${url}`);
+        });
+
+        await expect(
+            discoverRepositories(client, university, 2, {
+                university: university.key,
+            }),
+        ).rejects.toMatchObject({
+            name: 'RepositoryRecordValidationError',
+            repository: 'repository 42',
+            field: 'full_name',
+        });
+    });
+
     test('paginates, deduplicates overlapping repositories and owners, and uses the documented defaults', async () => {
         const client = createTestClient((url) => {
             if (url.pathname === '/search/repositories') {
@@ -190,7 +311,7 @@ describe('discoverRepositories', () => {
                 university: university.key,
                 login,
                 ownerType: kind,
-                endpoint: `https://api.github.com${endpoint}?per_page=100&${kind === 'Organization' ? 'type=public' : 'type=owner'}`,
+                endpoint: `https://api.github.com${endpoint}`,
                 status: 404,
                 reason: expect.stringContaining('HTTP 404'),
             }),
@@ -235,7 +356,9 @@ describe('discoverRepositories', () => {
         ]);
         expect(result.skippedOwners).toHaveLength(1);
         expect(result.skippedOwners[0].login).toBe('late-missing');
-        expect(result.skippedOwners[0].endpoint).toContain('page=2');
+        expect(result.skippedOwners[0].endpoint).toBe(
+            'https://api.github.com/orgs/late-missing/repos',
+        );
     });
 
     test('returns partial discovery when every owner is unavailable and has no candidates', async () => {
@@ -305,7 +428,7 @@ describe('discoverRepositories', () => {
         expect(fallbackRequests).toBe(0);
     });
 
-    test.each([401, 403, 500])(
+    test.each([401, 403, 451, 500])(
         'keeps unrelated owner-listing HTTP %s errors fatal in best-effort mode',
         async (status) => {
             const client = createTestClient((url) => {
@@ -339,6 +462,23 @@ describe('discoverRepositories', () => {
                 discoverRepositories(client, university),
             ).rejects.toMatchObject({
                 cause: expect.objectContaining({ status }),
+            });
+        },
+    );
+
+    test.each(['/search/repositories', '/search/users'])(
+        'keeps HTTP 451 from discovery endpoint %s fatal',
+        async (restrictedPath) => {
+            const client = createTestClient((url) =>
+                url.pathname === restrictedPath
+                    ? jsonResponse({ message: 'Unavailable' }, {}, 451)
+                    : jsonResponse(searchEnvelope([])),
+            );
+
+            await expect(
+                discoverRepositories(client, university),
+            ).rejects.toMatchObject({
+                cause: expect.objectContaining({ status: 451 }),
             });
         },
     );

@@ -17,6 +17,90 @@ export class GitHubPaginationError extends Error {
     }
 }
 
+export type GitHubSearchEndpointKind = 'repositories' | 'users';
+export type GitHubSearchKind = 'repository' | 'organization' | 'user';
+export type GitHubSearchStage =
+    | 'probe'
+    | 'pagination'
+    | 'partition-aggregation';
+export type GitHubSearchFailureReason =
+    | 'incomplete-results'
+    | 'count-changed'
+    | 'short-results'
+    | 'invalid-search-metadata'
+    | 'created-filter-conflict'
+    | 'single-second-overflow'
+    | 'partition-limit'
+    | 'pagination-cycle'
+    | 'page-limit';
+
+export interface GitHubSearchErrorDetails {
+    reason: GitHubSearchFailureReason;
+    endpointKind: GitHubSearchEndpointKind;
+    searchKind: GitHubSearchKind;
+    stage: GitHubSearchStage;
+    expectedCount?: number;
+    observedCount?: number;
+    searchAttempts: number;
+    maxSearchAttempts: number;
+    retriesExhausted?: boolean;
+}
+
+/** A safe, structured failure from a logical GitHub search. */
+export class GitHubSearchError extends GitHubPaginationError {
+    readonly reason: GitHubSearchFailureReason;
+    readonly endpointKind: GitHubSearchEndpointKind;
+    readonly searchKind: GitHubSearchKind;
+    readonly stage: GitHubSearchStage;
+    readonly expectedCount?: number;
+    readonly observedCount?: number;
+    readonly maxSearchAttempts: number;
+    searchAttempts: number;
+    retriesExhausted: boolean;
+
+    constructor(details: GitHubSearchErrorDetails) {
+        super(searchFailureMessage(details.reason));
+        this.name = 'GitHubSearchError';
+        this.reason = details.reason;
+        this.endpointKind = details.endpointKind;
+        this.searchKind = details.searchKind;
+        this.stage = details.stage;
+        this.expectedCount = details.expectedCount;
+        this.observedCount = details.observedCount;
+        this.searchAttempts = details.searchAttempts;
+        this.maxSearchAttempts = details.maxSearchAttempts;
+        this.retriesExhausted = details.retriesExhausted ?? false;
+    }
+
+    setRetryOutcome(searchAttempts: number, retriesExhausted: boolean): void {
+        this.searchAttempts = searchAttempts;
+        this.retriesExhausted = retriesExhausted;
+    }
+}
+
+function searchFailureMessage(reason: GitHubSearchFailureReason): string {
+    switch (reason) {
+        case 'incomplete-results':
+            return 'GitHub marked search results incomplete';
+        case 'count-changed':
+            return 'GitHub search counts changed during discovery';
+        case 'short-results':
+            return 'GitHub search pagination returned fewer results than expected';
+        case 'invalid-search-metadata':
+            return 'GitHub search response contained invalid completeness metadata';
+        case 'created-filter-conflict':
+            return 'Capped GitHub search already contains a created: filter';
+        case 'single-second-overflow':
+            return 'GitHub search exceeds the result cap within one second';
+        case 'partition-limit':
+            return 'GitHub search exceeded its cumulative partition probe limit';
+        case 'pagination-cycle':
+            return 'GitHub search pagination repeated a page';
+        case 'page-limit':
+            return 'GitHub search pagination exceeded its page limit';
+    }
+}
+
 export function extractGitHubItems<T>(data: unknown): T[] {
     if (Array.isArray(data)) {
         return data as T[];
@@ -92,6 +176,7 @@ export async function paginateGitHub<T>(
                       headers: options.headers,
                       signal: options.signal,
                       timeoutMs: options.timeoutMs,
+                      allowNoContent: options.allowNoContent,
                   };
         const response: GitHubResponse<unknown> = await client.request<unknown>(
             nextPage,

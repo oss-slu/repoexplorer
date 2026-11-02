@@ -2,7 +2,14 @@ import { discoverRepositories } from './discoverRepositories';
 import { enrichRepository } from './enrichRepository';
 import { mapWithConcurrency } from './utils/concurrency';
 import { GitHubRequestClient } from './utils/githubRequest';
-import { withScrapingContext } from './utils/scrapingError';
+import {
+    cancellationForSignal,
+    findScrapingCancellation,
+    RepositoryEnrichmentSkipError,
+    withScrapingContext,
+} from './utils/scrapingError';
+import { projectScrapingDiagnostic } from './utils/scrapingDiagnostics';
+import { normalizeRepositoryText } from './utils/normalizeRepositoryText';
 import type {
     ScrapingProgressCallback,
     ScrapingProgressEvent,
@@ -10,13 +17,16 @@ import type {
 } from './types/progress';
 import type {
     RepositoryScrapingRecord,
-    OwnerListingPolicy,
+    ScrapingPolicy,
     ScrapingConfiguration,
     ScrapeUniversityOutcome,
+    ScrapeUniversityInterruption,
     ScrapeUniversityFailure,
     ScrapeUniversityResult,
     ScrapingRunResult,
     SkippedOwner,
+    SkippedRepository,
+    ScrapingWarning,
     UniversityConfiguration,
 } from './types/scraping';
 
@@ -24,6 +34,7 @@ export interface RepositoryStorePort {
     upsertUniversity(
         university: string,
         records: readonly RepositoryScrapingRecord[],
+        signal?: AbortSignal,
     ): Promise<number>;
 }
 
@@ -31,11 +42,15 @@ export type ScrapingRunnerDependencies = {
     client: GitHubRequestClient;
     store: RepositoryStorePort;
     now?: () => Date;
-    policy?: OwnerListingPolicy;
+    policy?: ScrapingPolicy;
     signal?: AbortSignal;
     onProgress?: ScrapingProgressCallback;
     onFatalError?: (university: string, error: Error) => void;
     progressNow?: () => number;
+    searchRetrySleep?: (
+        delayMs: number,
+        signal?: AbortSignal,
+    ) => Promise<void>;
 };
 
 type RunnerProgressEvent =
@@ -50,6 +65,8 @@ type RunnerProgressEvent =
           university: string;
           completed: number;
           total: number;
+          skipped?: number;
+          warnings?: number;
           label?: string;
       };
 
@@ -60,6 +77,20 @@ export async function runScraping(
     const results: ScrapeUniversityResult[] = [];
     const failures: ScrapeUniversityFailure[] = [];
     const outcomes: ScrapeUniversityOutcome[] = [];
+    const interruptions: ScrapeUniversityInterruption[] = [];
+    const runController = new AbortController();
+    const abortFromCaller = () => {
+        const cancellation = cancellationForSignal(dependencies.signal);
+        if (cancellation && !runController.signal.aborted) {
+            runController.abort(cancellation);
+        }
+    };
+    if (dependencies.signal?.aborted) abortFromCaller();
+    else
+        dependencies.signal?.addEventListener('abort', abortFromCaller, {
+            once: true,
+        });
+    const runSignal = runController.signal;
     const startedAt = (dependencies.progressNow ?? Date.now)();
     const elapsedMs = () =>
         Math.max(0, (dependencies.progressNow ?? Date.now)() - startedAt);
@@ -67,66 +98,108 @@ export async function runScraping(
         const eventWithElapsed = { ...event, elapsedMs: elapsedMs() };
         dependencies.onProgress?.(eventWithElapsed);
     };
-    for (const university of configuration.universities) {
-        if (dependencies.signal?.aborted) break;
-        try {
-            const result = await scrapeUniversity(
-                dependencies.client,
-                dependencies.store,
-                university,
-                configuration.repositoryConcurrency,
-                dependencies.now,
-                dependencies.policy ?? 'best-effort',
-                dependencies.signal,
-                emit,
-                elapsedMs,
-                dependencies.onProgress,
-                dependencies.onFatalError,
-            );
-            results.push(result);
-            outcomes.push(result);
-        } catch (error) {
-            if (error instanceof UniversityScrapeError) {
-                const failure: ScrapeUniversityFailure = {
-                    status: 'failed',
-                    university: university.key,
-                    discovered: error.discovered,
-                    error: error.scrapeError,
-                    skippedOwners: error.skippedOwners,
-                };
-                failures.push(failure);
-                outcomes.push(failure);
-            } else {
-                const failure: ScrapeUniversityFailure = {
-                    status: 'failed',
-                    university: university.key,
-                    error: asError(error),
-                    skippedOwners: [],
-                };
-                failures.push(failure);
-                outcomes.push(failure);
+    try {
+        for (const university of configuration.universities) {
+            if (runSignal.aborted) break;
+            try {
+                const result = await scrapeUniversity(
+                    dependencies.client,
+                    dependencies.store,
+                    university,
+                    configuration.repositoryConcurrency,
+                    dependencies.now,
+                    dependencies.policy ?? 'best-effort',
+                    runSignal,
+                    dependencies.searchRetrySleep,
+                    emit,
+                    elapsedMs,
+                    dependencies.onProgress,
+                    dependencies.onFatalError,
+                );
+                results.push(result);
+                outcomes.push(result);
+            } catch (error) {
+                const cancellation = findScrapingCancellation(error);
+                if (cancellation) {
+                    const diagnostic = projectScrapingDiagnostic(error);
+                    const scrapeError =
+                        error instanceof UniversityScrapeError
+                            ? error
+                            : undefined;
+                    const interruption: ScrapeUniversityInterruption = {
+                        status: 'interrupted',
+                        university: university.key,
+                        ...(scrapeError?.discovered === undefined
+                            ? {}
+                            : { discovered: scrapeError.discovered }),
+                        cancellationSource: cancellation.source,
+                        ...(diagnostic.phase && diagnostic.phase !== 'database preflight'
+                            ? { phase: diagnostic.phase }
+                            : {}),
+                        ...(diagnostic.owner ? { owner: diagnostic.owner } : {}),
+                        ...(diagnostic.repository
+                            ? { repository: diagnostic.repository }
+                            : {}),
+                        ...(diagnostic.detail ? { detail: diagnostic.detail } : {}),
+                        skippedOwners: scrapeError?.skippedOwners ?? [],
+                        skippedRepositories:
+                            scrapeError?.skippedRepositories ?? [],
+                        warnings: scrapeError?.warnings ?? [],
+                    };
+                    interruptions.push(interruption);
+                    outcomes.push(interruption);
+                    break;
+                }
+                if (error instanceof UniversityScrapeError) {
+                    const failure: ScrapeUniversityFailure = {
+                        status: 'failed',
+                        university: university.key,
+                        discovered: error.discovered,
+                        error: error.scrapeError,
+                        skippedOwners: error.skippedOwners,
+                        skippedRepositories: error.skippedRepositories,
+                        warnings: error.warnings,
+                    };
+                    failures.push(failure);
+                    outcomes.push(failure);
+                } else {
+                    const failure: ScrapeUniversityFailure = {
+                        status: 'failed',
+                        university: university.key,
+                        error: asError(error),
+                        skippedOwners: [],
+                        skippedRepositories: [],
+                        warnings: [],
+                    };
+                    failures.push(failure);
+                    outcomes.push(failure);
+                }
+                if (runSignal.aborted) break;
             }
-            if (dependencies.signal?.aborted) break;
         }
-    }
 
-    const completedUniversities = new Set(
-        outcomes.map((outcome) => outcome.university),
-    );
-    for (const university of configuration.universities) {
-        if (!completedUniversities.has(university.key)) {
-            outcomes.push({ status: 'not_run', university: university.key });
+        const completedUniversities = new Set(
+            outcomes.map((outcome) => outcome.university),
+        );
+        for (const university of configuration.universities) {
+            if (!completedUniversities.has(university.key)) {
+                outcomes.push({ status: 'not_run', university: university.key });
+            }
         }
+    } finally {
+        dependencies.signal?.removeEventListener('abort', abortFromCaller);
     }
 
     return {
         elapsedMs: elapsedMs(),
-        universitiesProcessed: results.length + failures.length,
+        universitiesProcessed:
+            results.length + failures.length + interruptions.length,
         committed: results.reduce(
             (total, result) => total + result.committed,
             0,
         ),
         failed: failures.length,
+        interrupted: interruptions.length,
         partial: results.filter((result) => result.status === 'partial').length,
         results,
         failures,
@@ -140,8 +213,11 @@ async function scrapeUniversity(
     university: UniversityConfiguration,
     repositoryConcurrency: number,
     now: (() => Date) | undefined,
-    policy: OwnerListingPolicy,
+    policy: ScrapingPolicy,
     parentSignal: AbortSignal | undefined,
+    searchRetrySleep:
+        | ((delayMs: number, signal?: AbortSignal) => Promise<void>)
+        | undefined,
     emit: (event: RunnerProgressEvent) => void,
     elapsedMs: () => number,
     onProgress: ScrapingProgressCallback | undefined,
@@ -149,10 +225,13 @@ async function scrapeUniversity(
 ): Promise<ScrapeUniversityResult> {
     let discovered: number | undefined;
     let skippedOwners: SkippedOwner[] = [];
+    const skippedRepositories: SkippedRepository[] = [];
+    const warnings: ScrapingWarning[] = [];
     let phase: ScrapingPhase = 'search';
     let fatalReported = false;
     const reportFatal = (error: unknown) => {
         if (fatalReported) return;
+        if (findScrapingCancellation(error)) return;
         fatalReported = true;
         onFatalError?.(university.key, asError(error));
     };
@@ -161,8 +240,12 @@ async function scrapeUniversity(
         onProgress?.({ ...event, elapsedMs: elapsedMs() });
     };
     const controller = new AbortController();
-    const abortFromParent = () =>
-        controller.abort(parentSignal?.reason ?? new Error('Run cancelled'));
+    const abortFromParent = () => {
+        const cancellation = cancellationForSignal(parentSignal);
+        if (cancellation && !controller.signal.aborted) {
+            controller.abort(cancellation);
+        }
+    };
     if (parentSignal?.aborted) {
         abortFromParent();
     } else {
@@ -183,6 +266,7 @@ async function scrapeUniversity(
                 university: university.key,
                 policy,
                 elapsedMs,
+                searchRetrySleep,
                 onProgress: forwardDiscoveryProgress,
                 onFatalError: reportFatal,
                 onOwnerSkipped(owner) {
@@ -202,33 +286,79 @@ async function scrapeUniversity(
             university: university.key,
             completed,
             total: discovered,
+            skipped: 0,
         });
-        const records = await mapWithConcurrency(
+        let skippedRepositoryCount = 0;
+        const enrichmentResults = await mapWithConcurrency(
             discovery.candidates,
             repositoryConcurrency,
             async (candidate) => {
-                const record = await enrichRepository(
-                    client,
-                    candidate,
-                    university,
-                    now,
-                ).catch((error: unknown) => {
+                try {
+                    const record = await enrichRepository(
+                        client,
+                        candidate,
+                        university,
+                        now,
+                        candidate.metadata,
+                    );
+                    const normalized = normalizeRepositoryText([record]);
+                    const repositoryWarnings = [
+                        ...(candidate.metadataWarnings ?? []),
+                        ...normalized.warnings,
+                    ];
+                    warnings.push(...repositoryWarnings);
+                    for (const warning of repositoryWarnings) {
+                        onProgress?.({
+                            type: 'warning',
+                            university: warning.university,
+                            repository: warning.repositoryName,
+                            field: warning.field,
+                            replacementCount: warning.replacementCount,
+                            code: warning.code,
+                            elapsedMs: elapsedMs(),
+                        });
+                    }
+                    completed += 1;
+                    emit({
+                        type: 'progress',
+                        phase,
+                        university: university.key,
+                        completed,
+                        total: discovered ?? 0,
+                        skipped: skippedRepositoryCount,
+                        warnings: warnings.length,
+                        label: candidate.fullName,
+                    });
+                    return normalized.records[0];
+                } catch (error) {
+                    if (error instanceof RepositoryEnrichmentSkipError) {
+                        if (policy === 'strict') {
+                            throw withScrapingContext(error, {
+                                phase: 'enrichment',
+                                university: university.key,
+                                repository: candidate.fullName,
+                            });
+                        }
+                        skippedRepositories.push(error.skippedRepository);
+                        skippedRepositoryCount += 1;
+                        completed += 1;
+                        emit({
+                            type: 'progress',
+                            phase,
+                            university: university.key,
+                            completed,
+                            total: discovered ?? 0,
+                            skipped: skippedRepositoryCount,
+                            label: `${candidate.fullName} (skipped)`,
+                        });
+                        return undefined;
+                    }
                     throw withScrapingContext(error, {
                         phase: 'enrichment',
                         university: university.key,
                         repository: candidate.fullName,
                     });
-                });
-                completed += 1;
-                emit({
-                    type: 'progress',
-                    phase,
-                    university: university.key,
-                    completed,
-                    total: discovered ?? 0,
-                    label: candidate.fullName,
-                });
-                return record;
+                }
             },
             (error) => {
                 reportFatal(error);
@@ -236,15 +366,47 @@ async function scrapeUniversity(
             },
         );
 
+        const records = enrichmentResults.filter(
+            (record): record is RepositoryScrapingRecord =>
+                record !== undefined,
+        );
+        emit({
+            type: 'progress',
+            phase,
+            university: university.key,
+            completed,
+            total: discovered,
+            skipped: skippedRepositoryCount,
+            warnings: warnings.length,
+        });
+
         phase = 'database write';
         emit({ type: 'phase', phase, university: university.key });
-        const committed = await store.upsertUniversity(university.key, records);
+        const cancellation = cancellationForSignal(parentSignal);
+        if (cancellation) {
+            throw withScrapingContext(cancellation, {
+                phase,
+                university: university.key,
+            });
+        }
+        const committed = await store.upsertUniversity(
+            university.key,
+            records,
+            parentSignal,
+        );
         return {
-            status: skippedOwners.length > 0 ? 'partial' : 'complete',
+            status:
+                skippedOwners.length > 0 ||
+                skippedRepositories.length > 0 ||
+                warnings.length > 0
+                    ? 'partial'
+                    : 'complete',
             university: university.key,
             discovered,
             committed,
             skippedOwners,
+            skippedRepositories,
+            warnings,
         };
     } catch (error) {
         if (!controller.signal.aborted) controller.abort(error);
@@ -257,6 +419,8 @@ async function scrapeUniversity(
             discovered,
             contextualError,
             skippedOwners,
+            skippedRepositories,
+            warnings,
         );
     } finally {
         parentSignal?.removeEventListener('abort', abortFromParent);
@@ -269,6 +433,8 @@ class UniversityScrapeError extends Error {
         readonly discovered: number | undefined,
         readonly scrapeError: Error,
         readonly skippedOwners: SkippedOwner[],
+        readonly skippedRepositories: SkippedRepository[],
+        readonly warnings: ScrapingWarning[],
     ) {
         super(scrapeError.message, { cause: scrapeError });
         this.name = 'UniversityScrapeError';
