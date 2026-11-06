@@ -146,6 +146,10 @@ export default function BarChartDiv({
                                               value: xLabel,
                                               position: 'insideBottom',
                                               offset: -15,
+                                              style: {
+                                                  fill: '#000000',
+                                                  fontWeight: 'bold',
+                                              },
                                           }
                                         : undefined
                                 }
@@ -161,7 +165,11 @@ export default function BarChartDiv({
                                               value: yLabel,
                                               angle: -90,
                                               position: 'insideLeft',
-                                              style: { textAnchor: 'middle' },
+                                              style: {
+                                                  textAnchor: 'middle',
+                                                  fill: '#000000',
+                                                  fontWeight: 'bold',
+                                              },
                                           }
                                         : undefined
                                 }
@@ -182,6 +190,10 @@ export default function BarChartDiv({
                                               value: xLabel,
                                               position: 'insideBottom',
                                               offset: -60,
+                                              style: {
+                                                  fill: '#000000',
+                                                  fontWeight: 'bold',
+                                              },
                                           }
                                         : undefined
                                 }
@@ -195,7 +207,11 @@ export default function BarChartDiv({
                                               value: yLabel,
                                               angle: -90,
                                               position: 'insideLeft',
-                                              style: { textAnchor: 'middle' },
+                                              style: {
+                                                  textAnchor: 'middle',
+                                                  fill: '#000000',
+                                                  fontWeight: 'bold',
+                                              },
                                           }
                                         : undefined
                                 }
