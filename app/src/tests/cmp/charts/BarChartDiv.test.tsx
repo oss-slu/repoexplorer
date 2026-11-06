@@ -1,3 +1,17 @@
+import { cloneElement, type ReactElement } from 'react';
+
+vi.mock('recharts', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('recharts')>();
+    return {
+        ...actual,
+        ResponsiveContainer: ({
+            children,
+        }: {
+            children: ReactElement<{ width?: number; height?: number }>;
+        }) => cloneElement(children, { width: 800, height: 400 }),
+    };
+});
+
 import { render, screen, waitFor } from '@testing-library/react';
 import BarChartDiv from '../../../cmp/charts/BarChartDiv';
 
@@ -32,8 +46,8 @@ describe('BarChartDiv', () => {
                     json: () =>
                         Promise.resolve({
                             communityFilesPresence: [
-                                { name: 'readme', value: 89.2 },
-                                { name: 'license', value: 65.9 },
+                                { name: 'readme', value: 96.3963963963964 },
+                                { name: 'license', value: 74.77477477477478 },
                             ],
                         }),
                 }),
@@ -44,6 +58,9 @@ describe('BarChartDiv', () => {
             <BarChartDiv
                 title="Community Files Presence"
                 endpoint="overview/communityFilesPresence"
+                xLabel="Feature"
+                yLabel="Percent of Repositories"
+                valueSuffix="%"
             />,
         );
 
@@ -52,6 +69,9 @@ describe('BarChartDiv', () => {
                 screen.getByText('Community Files Presence'),
             ).toBeInTheDocument();
         });
+
+        expect(await screen.findByText('96.4%')).toBeInTheDocument();
+        expect(await screen.findByText('Feature')).toBeInTheDocument();
     });
 
     it('renders a stacked bar chart with a legend once data loads', async () => {
