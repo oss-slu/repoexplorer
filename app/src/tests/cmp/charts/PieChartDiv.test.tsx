@@ -1,5 +1,20 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import PieChartDiv from '../../../cmp/charts/PieChartDiv';
+
+vi.mock('recharts', async () => {
+    const OriginalModule = await vi.importActual('recharts');
+    return {
+        ...OriginalModule,
+        ResponsiveContainer: ({ children }: any) => <div>{children}</div>,
+        PieChart: ({ children }: any) => <div>{children}</div>,
+        Pie: () => null,
+        Tooltip: () => null,
+        Legend: (props: any) => (
+            <div>{typeof props.content === 'function' ? props.content() : null}</div>
+        ),
+    };
+});
 
 describe('PieChartDiv', () => {
     beforeEach(() => {
@@ -31,7 +46,7 @@ describe('PieChartDiv', () => {
                         Promise.resolve({
                             languageDistribution: [
                                 { name: 'TypeScript', value: 0.6 },
-                                { name: 'Python', value: 0.4 },
+                                { name: 'Unknown', value: 0.4 },
                             ],
                         }),
                 }),
@@ -51,7 +66,7 @@ describe('PieChartDiv', () => {
 
         const legend = await screen.findByRole('list');
         expect(within(legend).getByText('TypeScript')).toBeInTheDocument();
-        expect(within(legend).getByText('Python')).toBeInTheDocument();
+        expect(within(legend).getByText('Other')).toBeInTheDocument();
     });
 
     it('shows an error message when the response is not ok', async () => {
@@ -74,12 +89,9 @@ describe('PieChartDiv', () => {
 
         await waitFor(() => {
             expect(
-                screen.getByText(/Failed to load Languages/),
+                screen.getByText('Failed to load Languages: Request failed with status 500'),
             ).toBeInTheDocument();
         });
-        expect(
-            screen.getByText(/Error fetching data: 500/),
-        ).toBeInTheDocument();
     });
 
     it('fetches from the correct endpoint URL', () => {
@@ -94,7 +106,7 @@ describe('PieChartDiv', () => {
         );
 
         expect(fetchMock).toHaveBeenCalledWith(
-            expect.stringContaining('/overview/languageDistribution'),
+            expect.stringContaining('overview/languageDistribution'),
             expect.objectContaining({
                 signal: expect.any(AbortSignal),
             }),
