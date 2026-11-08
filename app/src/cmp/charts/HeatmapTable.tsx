@@ -96,15 +96,38 @@ export default function HeatmapTable({
     return (
         <div className="heatmap-table">
             <h2>{title}</h2>
-            <table>
+            <table aria-label={`${title} heatmap`}>
+                <thead>
+                    <tr>
+                        <th 
+                            className="heatmap-row-heading"
+                            scope="col"
+                            aria-label="Security metric"
+                        />
+                        <th 
+                            className="heatmap-tick-spacer"
+                            scope="col"
+                            aria-hidden="true"
+                        />
+                        <th className="heatmap-column-heading" scope="col">
+                            Metric averages
+                        </th>
+                    </tr>
+                </thead>
                 <tbody>
                     {data.map((row) => {
                         const value = Number(row.value);
 
                         return (
                             <tr key={row.name}>
-                                <td>{formatLabel(row.name)}</td>
+                                <th className="heatmap-row-label" scope="row">
+                                    {formatLabel(row.name)}
+                                </th>
+                                <td className="heatmap-tick-cell">
+                                    <span aria-hidden="true" />
+                                </td>
                                 <td
+                                    className="heatmap-score-cell"
                                     style={{
                                         backgroundColor: getHeatmapColor(value),
                                     }}
@@ -115,6 +138,20 @@ export default function HeatmapTable({
                         );
                     })}
                 </tbody>
+                <tfoot>
+                    <tr>
+                        <td colSpan={2} aria-hidden="true" />
+                        <td className="heatmap-average-axis">
+                            <span
+                                className="heatmap-average-tick"
+                                aria-hidden="true"
+                            />
+                            <span className="heatmap-average-label">
+                                Average
+                            </span>
+                        </td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
     );
