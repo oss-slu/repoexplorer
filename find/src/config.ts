@@ -139,6 +139,9 @@ function requireNonEmptyString(value: unknown, name: string): string {
     if (typeof value !== 'string' || value.trim() === '') {
         throw new TypeError(`${name} must be a non-empty string`);
     }
+    if (value.includes('\u0000')) {
+        throw new TypeError(`${name} must not contain an actual NUL byte`);
+    }
     return value.trim();
 }
 

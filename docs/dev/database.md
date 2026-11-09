@@ -43,7 +43,7 @@ psql -h 127.0.0.1 -p "${PGPORT:-5433}" -U "$PGUSER" -d "$PGDATABASE"
 `db.Dockerfile` uses the official `postgres:17-alpine` image. The entrypoint uses `POSTGRES_DB` to create `PGDATABASE` on the first initialization of the named `db-data` volume, then runs these files in order:
 
 1. `scripts/db/setup.sql` creates or updates the restricted application role, grants access to the database and `public` schema, and sets default privileges.
-2. `scripts/db/schema.sql` creates `repositories`, `organizations`, and `security`, applies the reusable `repository-scraping.sql` table/grant script, then grants table access to the application role. The Docker image copies the staging SQL files beside the schema file so its `\ir` include also works during initialization.
+2. `scripts/db/schema.sql` creates `repositories`, `organizations`, and `security`, applies the reusable `repository-scraping.sql` table/grant script, then grants table access to the application role. That script also creates the finder checkpoint and ETag tables. The Docker image copies the finder SQL files beside the schema file so its `\ir` includes work during initialization.
 
 The Compose volume keeps database contents across container recreation and restart. Initialization files run automatically only when PostgreSQL finds an empty data directory. Changing `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `PGDATABASE` in `.env` does not rename the existing administrator or change its password/database inside a volume that was already initialized.
 
@@ -156,9 +156,9 @@ This staging table mirrors every `public.repositories` field and adds `scraped_a
 
 The implementation is in `find/src/enrichRepository.ts`; the checked-in SQL column order and keys are verified by `scripts/db/verify.sh`.
 
-### Add the staging table to an existing volume
+### Add finder tables to an existing volume
 
-Fresh volumes create `repository_scraping` through `schema.sql`. For an existing volume, apply the repeatable table/grant script as the database administrator. It creates only the staging table and grants its CRUD privileges to the configured application role; it does not alter or truncate the three existing datasets:
+Fresh volumes create `repository_scraping` and the finder checkpoint tables through `schema.sql`. For an existing volume, apply the repeatable table/grant script as the database administrator. It creates the finder tables and grants their required privileges to the configured application role; it does not alter or truncate the three existing datasets:
 
 ```sh
 docker compose exec -T db sh -eu -c '
@@ -170,7 +170,13 @@ docker compose exec -T db sh -eu -c '
 '
 ```
 
-The script can be applied repeatedly. Keep the database container image in sync with the repository so the migration files are present. The scraper does not create schema and requires the restricted application credentials.
+The script can be applied repeatedly. Keep the database container image in sync with the repository so `repository-scraping-checkpoints.sql` is present. The scraper does not create schema and requires the restricted application credentials.
+
+### Finder collection checkpoints and cache
+
+`public.repository_scraping_runs` tracks each run and university. `public.repository_scraping_run_repositories` holds discovered candidates, completed enrichment records, and terminal unchanged or skipped states while a university is in progress. The finder publishes complete records to `repository_scraping` in one transaction only after all candidates have a terminal state, then removes that run's temporary repository checkpoints. Failed or interrupted runs retain their checkpoints for a rerun with the same run ID. The run table retains its completion summary.
+
+`public.repository_scraping_cache` stores the ETag for each repository snapshot. Weekly refreshes read it before sending `If-None-Match` and update it only when a changed repository is successfully published. The collection CLI also holds a PostgreSQL advisory lock for its full run, so independently started finder processes sharing the database cannot overlap.
 
 ### `public.organizations`
 
