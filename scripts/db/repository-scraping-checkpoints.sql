@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS public.repository_scraping_cache (
     repository_id BIGINT NOT NULL CHECK (repository_id > 0),
     etag TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    contributors_etag TEXT,
     PRIMARY KEY (university, repository_id)
 );
 
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS public.repository_scraping_run_repositories (
     skipped_repository JSONB,
     warnings JSONB NOT NULL DEFAULT '[]'::JSONB,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    contributors_etag TEXT,
     PRIMARY KEY (run_id, university, repository_id),
     FOREIGN KEY (run_id, university)
         REFERENCES public.repository_scraping_runs (run_id, university)
@@ -41,7 +43,16 @@ CREATE TABLE IF NOT EXISTS public.repository_scraping_run_repositories (
     CHECK ((status = 'skipped') = (skipped_repository IS NOT NULL))
 );
 
+-- Tables created before conditional contributor reads gain the column with
+-- NULL values; those repositories read contributors unconditionally once.
+ALTER TABLE public.repository_scraping_cache
+    ADD COLUMN IF NOT EXISTS contributors_etag TEXT;
+ALTER TABLE public.repository_scraping_run_repositories
+    ADD COLUMN IF NOT EXISTS contributors_etag TEXT;
+
 COMMENT ON TABLE public.repository_scraping_runs IS
     'Durable per-university collection checkpoints; staged rows are published only after all candidates finish.';
 COMMENT ON TABLE public.repository_scraping_cache IS
     'Conditional request metadata for known repository snapshots.';
+COMMENT ON COLUMN public.repository_scraping_cache.contributors_etag IS
+    'ETag of the published contributor list; set only for lists that fit in one non-full page.';

@@ -31,10 +31,11 @@ test('drops a stale ETag when a modified repository response has no ETag', async
         return jsonResponse(repository({ description: 'Changed' }));
     });
 
-    const result = await refreshRepositoryMetadata(client, {
-        ...candidate,
-        etag: '"old"',
-    });
+    const result = await refreshRepositoryMetadata(
+        client,
+        { ...candidate, etag: '"old"' },
+        university.key,
+    );
 
     expect(result).toEqual({
         status: 'modified',
@@ -138,6 +139,17 @@ function commonHandler(
         ) {
             return jsonResponse([
                 { type: 'file', path: '.github/ISSUE_TEMPLATE/bug.yml' },
+            ]);
+        }
+        if (apiPath === '/repos/slu/project/contents') {
+            return jsonResponse([{ type: 'dir', path: '.github' }]);
+        }
+        if (apiPath === '/repos/slu/project/contents/.github') {
+            return jsonResponse([
+                { type: 'dir', path: '.github/ISSUE_TEMPLATE' },
+                ...(typeof options.securityPolicy === 'string'
+                    ? [{ type: 'file', path: '.github/SECURITY.md' }]
+                    : []),
             ]);
         }
         if (
@@ -852,5 +864,113 @@ describe('enrichRepository', () => {
             repository: 'slu/project',
             field: 'description',
         });
+    });
+});
+
+describe('optional repository files', () => {
+    function directoryClient(
+        listings: Record<string, unknown[]>,
+        files: Record<string, string>,
+        requests: string[],
+    ) {
+        return createTestClient((url) => {
+            const apiPath = url.pathname;
+            requests.push(apiPath);
+            const contentsPath = apiPath.replace(
+                /^\/repos\/slu\/project\/contents\/?/,
+                '',
+            );
+            if (apiPath === '/repos/slu/project') {
+                return jsonResponse(repository());
+            }
+            if (
+                apiPath.endsWith('/releases') ||
+                apiPath.endsWith('/contributors')
+            ) {
+                return jsonResponse([]);
+            }
+            if (apiPath.endsWith('/community/profile')) {
+                return jsonResponse({ files: {} });
+            }
+            if (apiPath.startsWith('/repos/slu/project/contents')) {
+                if (contentsPath in listings) {
+                    return jsonResponse(listings[contentsPath]);
+                }
+                if (contentsPath in files) {
+                    return textResponse(files[contentsPath]);
+                }
+            }
+            return jsonResponse({ message: 'Not Found' }, {}, 404);
+        });
+    }
+
+    test('lists the root once instead of probing absent security and template paths', async () => {
+        const requests: string[] = [];
+        const client = directoryClient(
+            { '': [{ type: 'file', path: 'README.md' }] },
+            {},
+            requests,
+        );
+
+        const record = await enrichRepository(client, candidate, university);
+
+        expect(record.securityPolicy).toBeNull();
+        expect(record.issueTemplates).toBeNull();
+        expect(requests.filter((path) => path.includes('/contents'))).toEqual([
+            '/repos/slu/project/contents',
+        ]);
+        expect(requests).toHaveLength(6);
+    });
+
+    test('reads a symlinked root SECURITY.md before nested locations', async () => {
+        const requests: string[] = [];
+        const client = directoryClient(
+            {
+                '': [
+                    { type: 'symlink', path: 'SECURITY.md' },
+                    { type: 'dir', path: '.github' },
+                ],
+                '.github': [{ type: 'file', path: '.github/SECURITY.md' }],
+            },
+            { 'SECURITY.md': 'root policy', '.github/SECURITY.md': 'nested' },
+            requests,
+        );
+
+        const record = await enrichRepository(client, candidate, university);
+
+        expect(record.securityPolicy).toBe('root policy');
+    });
+
+    test('finds docs/SECURITY.md and docs issue templates through the docs listing', async () => {
+        const requests: string[] = [];
+        const client = directoryClient(
+            {
+                '': [{ type: 'dir', path: 'docs' }],
+                docs: [
+                    { type: 'file', path: 'docs/SECURITY.md' },
+                    { type: 'dir', path: 'docs/ISSUE_TEMPLATE' },
+                ],
+                'docs/ISSUE_TEMPLATE': [
+                    { type: 'file', path: 'docs/ISSUE_TEMPLATE/bug.yml' },
+                ],
+            },
+            {
+                'docs/SECURITY.md': 'docs policy',
+                'docs/ISSUE_TEMPLATE/bug.yml': 'name: Bug',
+            },
+            requests,
+        );
+
+        const record = await enrichRepository(client, candidate, university);
+
+        expect(record.securityPolicy).toBe('docs policy');
+        expect(JSON.parse(record.issueTemplates ?? 'null')).toEqual([
+            { path: 'docs/ISSUE_TEMPLATE/bug.yml', content: 'name: Bug' },
+        ]);
+        expect(
+            requests.filter(
+                (path) => path === '/repos/slu/project/contents/docs',
+            ),
+        ).toHaveLength(1);
     });
 });

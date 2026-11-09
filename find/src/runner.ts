@@ -1,5 +1,5 @@
 import { discoverRepositories } from './discoverRepositories';
-import { enrichRepository } from './enrichRepository';
+import { createEnrichmentOptions, enrichRepository } from './enrichRepository';
 import { mapWithConcurrency } from './utils/concurrency';
 import { GitHubRequestClient } from './utils/githubRequest';
 import {
@@ -16,6 +16,7 @@ import type {
     ScrapingPhase,
 } from './types/progress';
 import type {
+    EnrichmentApi,
     RepositoryScrapingRecord,
     ScrapingPolicy,
     ScrapingConfiguration,
@@ -107,6 +108,7 @@ export async function runScraping(
                     dependencies.store,
                     university,
                     configuration.repositoryConcurrency,
+                    configuration.enrichmentApi,
                     dependencies.now,
                     dependencies.policy ?? 'best-effort',
                     runSignal,
@@ -212,6 +214,7 @@ async function scrapeUniversity(
     store: RepositoryStorePort,
     university: UniversityConfiguration,
     repositoryConcurrency: number,
+    enrichmentApi: EnrichmentApi | undefined,
     now: (() => Date) | undefined,
     policy: ScrapingPolicy,
     parentSignal: AbortSignal | undefined,
@@ -289,6 +292,10 @@ async function scrapeUniversity(
             skipped: 0,
         });
         let skippedRepositoryCount = 0;
+        const enrichmentOptions = createEnrichmentOptions(
+            client,
+            enrichmentApi,
+        );
         const enrichmentResults = await mapWithConcurrency(
             discovery.candidates,
             repositoryConcurrency,
@@ -300,6 +307,7 @@ async function scrapeUniversity(
                         university,
                         now,
                         candidate.metadata,
+                        enrichmentOptions,
                     );
                     const normalized = normalizeRepositoryText([record]);
                     const repositoryWarnings = [

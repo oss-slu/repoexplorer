@@ -15,7 +15,7 @@ export type GitHubAccessDiagnostic = {
     reason: string;
     ssoStatus?: 'required' | 'partial-results';
     quota?: {
-        bucket: 'core' | 'search';
+        bucket: 'core' | 'search' | 'graphql';
         classification?: 'primary rate limit' | 'secondary rate limit';
         limit?: number;
         remaining?: number;
@@ -184,7 +184,7 @@ export function createInterruptedGitHubDiagnostic(
 
 export function createConfigurationGitHubDiagnostic(
     credential: GitHubCredentialState,
-    reason: 'invalid-arguments' | 'invalid-credential-configuration',
+    reason: 'invalid-arguments',
     nextStep: string,
     owner?: string,
 ): GitHubAccessDiagnosticResult {
@@ -255,8 +255,6 @@ function diagnosticReason(
     }
     if (diagnostic.accessReason) return diagnostic.accessReason;
     switch (diagnostic.category) {
-        case 'credential-provider':
-            return 'credential-provider';
         case 'authentication':
             return 'authentication';
         case 'permission':
@@ -279,9 +277,6 @@ function diagnosticReason(
 function diagnosticHint(
     diagnostic: ReturnType<typeof projectScrapingDiagnostic>,
 ): string {
-    if (diagnostic.category === 'credential-provider') {
-        return 'Check the GitHub App private key, App and installation IDs, and installation-token authorization; the organization request was not sent.';
-    }
     if (diagnostic.category === 'legal-restriction') {
         return diagnostic.remediationHint ?? 'GitHub reports that this resource is unavailable for legal reasons; the response does not establish the specific legal basis.';
     }
@@ -292,7 +287,7 @@ function diagnosticHint(
         return 'Check the effective personal access token’s access to this resource and endpoint.';
     }
     if (diagnostic.accessReason === 'integration-resource-inaccessible') {
-        return 'Check the GitHub App installation includes this resource and can access the endpoint.';
+        return 'GitHub reports that the integration token (such as an Actions GITHUB_TOKEN) cannot access this resource; use a personal access token with access to it.';
     }
     if (diagnostic.accessReason === 'unknown-forbidden') {
         return 'Verify the effective token and organization access with this diagnostic; the exact cause is unconfirmed.';

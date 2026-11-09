@@ -19,7 +19,6 @@ import {
 } from '../utils/githubRequest';
 import type { GitHubTokenProvenance } from '../utils/environment';
 import { jsonResponse } from './githubFixtures';
-import { GitHubAppTokenProvider } from '../utils/githubAppToken';
 
 const skippedOwner = {
     university: 'Saint Louis University',
@@ -446,12 +445,7 @@ const environmentCredential: GitHubTokenProvenance = {
     usable: true,
 };
 
-const authEnvironmentNames = [
-    'GITHUB_TOKEN',
-    'FINDER_GITHUB_APP_ID',
-    'FINDER_GITHUB_APP_PRIVATE_KEY',
-    'FINDER_GITHUB_APP_INSTALLATION_ID',
-] as const;
+const authEnvironmentNames = ['GITHUB_TOKEN'] as const;
 const originalAuthEnvironment = new Map(
     authEnvironmentNames.map((name) => [name, process.env[name]]),
 );
@@ -518,86 +512,6 @@ test('diagnoses one repository-list page without loading collection config or Po
         quota: { bucket: 'core', limit: 5_000, remaining: 4_000 },
     });
     expect(sink.chunks[0]).not.toContain('synthetic-diagnostic-token');
-});
-
-test('reuses an active GitHub App provider and reports its credential source', async () => {
-    process.env.FINDER_GITHUB_APP_ID = 'app-id-secret';
-    process.env.FINDER_GITHUB_APP_PRIVATE_KEY = 'private-key-secret';
-    process.env.FINDER_GITHUB_APP_INSTALLATION_ID = 'installation-secret';
-    const sink = outputSink();
-    const exitCode = await runCli(
-        ['--diagnose-github', '--owner', 'oss-slu'],
-        {
-            tokenProvenance: {
-                source: 'none',
-                configured: false,
-                usable: false,
-            },
-            signalHandlers: false,
-            stdout: sink.stream,
-            createAppTokenProvider: () =>
-                new GitHubAppTokenProvider({
-                    appId: process.env.FINDER_GITHUB_APP_ID!,
-                    privateKey: process.env.FINDER_GITHUB_APP_PRIVATE_KEY!,
-                    installationId:
-                        process.env.FINDER_GITHUB_APP_INSTALLATION_ID!,
-                    initialToken: 'app-token-secret',
-                }),
-            createRequestClient: (config) =>
-                requestClient((_, init) => {
-                    expect(
-                        new Headers(init.headers).get('Authorization'),
-                    ).toBe('Bearer app-token-secret');
-                    return jsonResponse([]);
-                }, config),
-        },
-    );
-    expect(exitCode).toBe(0);
-    expect(JSON.parse(sink.chunks[0]).credential).toEqual({
-        source: 'github-app',
-        configured: true,
-        usable: true,
-    });
-    for (const secret of [
-        'app-token-secret',
-        'app-id-secret',
-        'private-key-secret',
-        'installation-secret',
-    ]) {
-        expect(sink.chunks[0]).not.toContain(secret);
-    }
-});
-
-test('reports an incomplete App credential configuration without making a request', async () => {
-    process.env.FINDER_GITHUB_APP_ID = 'app-id-secret';
-    const sink = outputSink();
-    let clientCreated = false;
-    const exitCode = await runCli(
-        ['--diagnose-github', '--owner', 'oss-slu'],
-        {
-            tokenProvenance: environmentCredential,
-            signalHandlers: false,
-            stdout: sink.stream,
-            createRequestClient: () => {
-                clientCreated = true;
-                throw new Error('Request client should not be created');
-            },
-        },
-    );
-
-    expect(exitCode).toBe(1);
-    expect(clientCreated).toBe(false);
-    expect(sink.chunks).toHaveLength(1);
-    expect(JSON.parse(sink.chunks[0])).toMatchObject({
-        credential: {
-            source: 'github-app',
-            configured: true,
-            usable: false,
-        },
-        outcome: 'failure',
-        reason: 'invalid-credential-configuration',
-    });
-    expect(sink.chunks[0]).not.toContain('app-id-secret');
 });
 
 test.each<{
@@ -1069,54 +983,4 @@ test('labels a zero-row partial run and a mixed partial/fatal run clearly', () =
             true,
         ),
     ).toContain('FAILED AND INTERRUPTED');
-});
-
-test.each(['environment', 'root-env-file'] as const)(
-    'reports the actual %s initial token separately from the App refresh provider',
-    async (source) => {
-        process.env.GITHUB_TOKEN = 'initial-secret-sentinel';
-        process.env.FINDER_GITHUB_APP_ID = '123';
-        process.env.FINDER_GITHUB_APP_PRIVATE_KEY = 'unused-key';
-        process.env.FINDER_GITHUB_APP_INSTALLATION_ID = '456';
-        const sink = outputSink();
-        let requests = 0;
-        const exitCode = await runCli(['--diagnose-github', '--owner', 'oss-slu'], {
-            tokenProvenance: { source, configured: true, usable: true },
-            signalHandlers: false,
-            stdout: sink.stream,
-            createRequestClient: (config) => requestClient((_, init) => {
-                requests++;
-                expect(new Headers(init.headers).get('Authorization')).toBe('Bearer initial-secret-sentinel');
-                return jsonResponse([]);
-            }, config),
-        });
-        expect(exitCode).toBe(0);
-        expect(requests).toBe(1);
-        expect(JSON.parse(sink.chunks[0]).credential).toEqual({
-            source, refreshProvider: 'github-app', configured: true, usable: true,
-        });
-        expect(sink.chunks.join('')).not.toContain('initial-secret-sentinel');
-    },
-);
-
-test('invalid App signing key reports credential failure without an organization request', async () => {
-    delete process.env.GITHUB_TOKEN;
-    process.env.FINDER_GITHUB_APP_ID = '123';
-    process.env.FINDER_GITHUB_APP_PRIVATE_KEY = 'invalid-key-secret-sentinel';
-    process.env.FINDER_GITHUB_APP_INSTALLATION_ID = '456';
-    const sink = outputSink();
-    let requests = 0;
-    const exitCode = await runCli(['--diagnose-github', '--owner', 'oss-slu'], {
-        signalHandlers: false,
-        stdout: sink.stream,
-        createRequestClient: (config) => requestClient(() => {
-            requests++;
-            return jsonResponse([]);
-        }, config),
-    });
-    expect(exitCode).toBe(1);
-    expect(requests).toBe(0);
-    expect(JSON.parse(sink.chunks[0]).reason).toBe('credential-provider');
-    expect(sink.chunks.join('')).not.toContain('invalid-key-secret-sentinel');
-    expect(sink.chunks.join('')).not.toContain('network-error');
 });

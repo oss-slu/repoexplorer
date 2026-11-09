@@ -68,9 +68,26 @@ describe('RepositoryStore read-only preflight', () => {
             }
             if (sql.includes('information_schema.columns')) {
                 return {
-                    rows: REQUIRED_REPOSITORY_SCRAPING_COLUMNS.filter(
-                        (column) => column !== options.missingColumn,
-                    ).map((column_name) => ({ column_name })),
+                    rows: [
+                        ...REQUIRED_REPOSITORY_SCRAPING_COLUMNS.map(
+                            (column_name) => ({
+                                table_name: 'repository_scraping',
+                                column_name,
+                            }),
+                        ),
+                        {
+                            table_name: 'repository_scraping_cache',
+                            column_name: 'contributors_etag',
+                        },
+                        {
+                            table_name: 'repository_scraping_run_repositories',
+                            column_name: 'contributors_etag',
+                        },
+                    ].filter(
+                        (row) =>
+                            `${row.table_name}.${row.column_name}` !==
+                            options.missingColumn,
+                    ),
                 };
             }
             return {
@@ -114,7 +131,18 @@ describe('RepositoryStore read-only preflight', () => {
 
     test.each([
         [{ tableExists: false }, 'missing-table'],
-        [{ missingColumn: 'readme' }, 'missing-columns'],
+        [{ missingColumn: 'repository_scraping.readme' }, 'missing-columns'],
+        [
+            { missingColumn: 'repository_scraping_cache.contributors_etag' },
+            'missing-columns',
+        ],
+        [
+            {
+                missingColumn:
+                    'repository_scraping_run_repositories.contributors_etag',
+            },
+            'missing-columns',
+        ],
         [{ canInsert: false }, 'privileges'],
     ] as const)('reports a sanitized preflight failure for %s', async (options, failure) => {
         const mock = createPreflightPool(options);
@@ -137,6 +165,38 @@ describe('RepositoryStore read-only preflight', () => {
             failure: 'connection',
             sqlState: '08006',
         });
+    });
+});
+
+describe('RepositoryStore contributor cache', () => {
+    test('attaches a saved contributor ETag only to a JSON login list', async () => {
+        const row = (id: string, contributors: string | null, etag: string | null) => ({
+            id,
+            full_name: `owner/repository-${id}`,
+            html_url: null,
+            etag: '"repository"',
+            contributors,
+            contributors_etag: etag,
+        });
+        const pool = {
+            query: jest.fn(async () => ({
+                rows: [
+                    row('1', '["alice","bob"]', '"c1"'),
+                    row('2', '["alice"]', null),
+                    row('3', "['alice']", '"legacy"'),
+                    row('4', '[1]', '"invalid"'),
+                ],
+            })),
+        } as unknown as Pool;
+
+        const known = await new RepositoryStore(pool).listKnownRepositories('University');
+
+        expect(known.map((candidate) => candidate.contributorCache)).toEqual([
+            { etag: '"c1"', logins: ['alice', 'bob'] },
+            undefined,
+            undefined,
+            undefined,
+        ]);
     });
 });
 

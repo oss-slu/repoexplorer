@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type {
+    EnrichmentApi,
     ScrapingConfiguration,
     SearchQueries,
     UniversityConfiguration,
@@ -66,7 +67,17 @@ export function validateScrapingConfiguration(
             1,
             500,
         ),
+        ...(value.enrichmentApi === undefined
+            ? {}
+            : { enrichmentApi: readEnrichmentApi(value.enrichmentApi) }),
     };
+}
+
+function readEnrichmentApi(value: unknown): EnrichmentApi {
+    if (value !== 'graphql' && value !== 'rest') {
+        throw new TypeError("enrichmentApi must be 'graphql' or 'rest'");
+    }
+    return value;
 }
 
 function validateUniversity(

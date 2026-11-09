@@ -59,7 +59,7 @@ BEGIN
             ),
             (
                 'repository_scraping_cache',
-                ARRAY['university', 'repository_id', 'etag', 'updated_at']::TEXT[],
+                ARRAY['university', 'repository_id', 'etag', 'updated_at', 'contributors_etag']::TEXT[],
                 ARRAY['university', 'repository_id']::TEXT[]
             ),
             (
@@ -75,7 +75,8 @@ BEGIN
                 'repository_scraping_run_repositories',
                 ARRAY[
                     'run_id', 'university', 'repository_id', 'candidate', 'status',
-                    'record', 'etag', 'skipped_repository', 'warnings', 'updated_at'
+                    'record', 'etag', 'skipped_repository', 'warnings', 'updated_at',
+                    'contributors_etag'
                 ]::TEXT[],
                 ARRAY['run_id', 'university', 'repository_id']::TEXT[]
             )

@@ -36,7 +36,7 @@ export class CliProgressRenderer {
     private elapsedMs = 0;
     private activeRequests = 0;
     private queuedRequests = 0;
-    private waits: Partial<Record<'core' | 'search', number>> = {};
+    private waits: Partial<Record<'core' | 'search' | 'graphql', number>> = {};
     private timer: ReturnType<typeof setInterval> | undefined;
     private startedAt: number | undefined;
     private lastRender = Number.NEGATIVE_INFINITY;
@@ -107,7 +107,12 @@ export class CliProgressRenderer {
         } else if (event.type === 'rate-limit-wait') {
             const until = event.until;
             if (event.bucket === 'all') {
-                this.waits = { ...this.waits, core: until, search: until };
+                this.waits = {
+                    ...this.waits,
+                    core: until,
+                    search: until,
+                    graphql: until,
+                };
             } else {
                 this.waits = { ...this.waits, [event.bucket]: until };
             }
@@ -161,7 +166,7 @@ export class CliProgressRenderer {
             this.activeRequests || this.queuedRequests
                 ? ` | ${this.activeRequests} active${this.queuedRequests ? `, ${this.queuedRequests} queued` : ''}`
                 : '';
-        const waitLabels = (['search', 'core'] as const)
+        const waitLabels = (['search', 'core', 'graphql'] as const)
             .filter((bucket) => (this.waits[bucket] ?? 0) > this.now())
             .map(
                 (bucket) =>

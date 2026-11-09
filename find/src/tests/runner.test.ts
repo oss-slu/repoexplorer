@@ -89,7 +89,7 @@ function sharedRepositoryClient(
         if (url.pathname === '/repos/shared/repository/community/profile') {
             return jsonResponse({ message: 'Not Found' }, {}, 404);
         }
-        if (url.pathname.startsWith('/repos/shared/repository/contents/')) {
+        if (url.pathname.startsWith('/repos/shared/repository/contents')) {
             return jsonResponse({ message: 'Not Found' }, {}, 404);
         }
         throw new Error(`Unexpected request: ${url}`);
@@ -182,7 +182,7 @@ function recoveryClient(
         if (url.pathname === `${goodPrefix}/community/profile`) {
             return jsonResponse({ files: {} });
         }
-        if (url.pathname.startsWith(`${goodPrefix}/contents/`)) {
+        if (url.pathname.startsWith(`${goodPrefix}/contents`)) {
             return jsonResponse({ message: 'Not Found' }, {}, 404);
         }
         if (url.pathname.startsWith('/repos/slu/')) {
