@@ -107,7 +107,6 @@ export default function HeatmapTable({
                         <th 
                             className="heatmap-tick-spacer"
                             scope="col"
-                            aria-hidden="true"
                         />
                         <th className="heatmap-column-heading" scope="col">
                             Metric averages
