@@ -6,5 +6,6 @@ output.json
 *.parquet
 dist
 /find/reports/
+/find/config/universities.json
 .DS_Store
 *.tsbuildinfo
