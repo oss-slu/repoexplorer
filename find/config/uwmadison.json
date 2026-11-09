@@ -1,0 +1,11 @@
+{
+    "repositoryConcurrency": 6,
+    "databaseBatchSize": 100,
+    "universities": [
+        {
+            "fullName": "University of Wisconsin, Madison",
+            "key": "University of Wisconsin, Madison",
+            "acronym": "UWMadison"
+        }
+    ]
+}

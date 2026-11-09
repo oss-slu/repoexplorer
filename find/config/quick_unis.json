@@ -1,0 +1,16 @@
+{
+    "repositoryConcurrency": 8,
+    "databaseBatchSize": 100,
+    "universities": [
+        {
+            "fullName": "Biohub",
+            "key": "Biohub",
+            "acronym": "Biohub"
+        },
+        {
+            "fullName": "University of Wisconsin, Madison",
+            "key": "University of Wisconsin, Madison",
+            "acronym": "UWMadison"
+        }
+    ]
+}
