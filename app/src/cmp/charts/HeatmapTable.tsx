@@ -139,7 +139,7 @@ export default function HeatmapTable({
                 </tbody>
                 <tfoot>
                     <tr>
-                        <td colSpan={2} aria-hidden="true" />
+                        <td colSpan={2} />
                         <td className="heatmap-average-axis">
                             <span
                                 className="heatmap-average-tick"
