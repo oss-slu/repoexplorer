@@ -31,6 +31,7 @@ services:
             dockerfile: api.Dockerfile
         restart: unless-stopped
         environment:
+            DATA_SOURCE: ${DATA_SOURCE:-json}
             PGHOST: db
             PGPORT: 5432
             PGDATABASE: ${PGDATABASE:?Set PGDATABASE in .env}

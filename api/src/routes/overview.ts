@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { BASE_OVERVIEW, FILTERABLE_REPO_FIELDS } from '../consts';
 import type { RespOverview } from '../types/routes';
 import type { repoData } from '../types/appData';
-import sampleData from '../../data/sample/sampleRepoData.json';
+import type { AppDataSource } from '../types/AppDataSource';
 import {
     getAvg,
     getCountFieldNotNull,
@@ -14,9 +14,6 @@ import {
     makeFieldsNotNullArray,
 } from '../utils/math';
 import { filterData } from '../utils/filter';
-
-const data = sampleData as repoData[];
-const router = Router();
 
 // Create endpoint map: the string is the /destination and the function call gets the appropriate data
 const SUB_ENDPOINTS = {
@@ -52,24 +49,42 @@ function makeResponse(rows: repoData[]): RespOverview {
     return Object.fromEntries(endpoints.map((endpoint) => [endpoint, SUB_ENDPOINTS[endpoint](rows)])) as RespOverview;
 }
 
-// Register primary GET response: build and return full RespOverview object
-router.get(BASE_OVERVIEW, (req, res) => {
-    const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
-    res.json(makeResponse(filtered));
-});
 
-// Register sub GET responses for each endpoint.
-for (const endpoint of endpoints) {
-    router.get(`${BASE_OVERVIEW}/${endpoint}`, (req, res) => {
-        const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
-        const value = SUB_ENDPOINTS[endpoint](filtered);
-        res.json({ [endpoint]: value });
+export function createOverviewRouter(dataSource: AppDataSource) {
+    const router = Router();
+
+    router.get(BASE_OVERVIEW, async (req, res, next) => {
+        try {
+            const data = await dataSource.getRepoData();
+            const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
+            res.json(makeResponse(filtered));
+        } catch (error) {
+            next(error);
+        }
     });
+
+    for (const endpoint of endpoints) {
+        router.get(`${BASE_OVERVIEW}/${endpoint}`, async (req, res, next) => {
+            try {
+                const data = await dataSource.getRepoData();
+                const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
+                const value = SUB_ENDPOINTS[endpoint](filtered);
+                res.json({ [endpoint]: value });
+            } catch (error) {
+                next(error);
+            }
+        });
+    }
+
+    router.get(`${BASE_OVERVIEW}/repositories`, async (req, res, next) => {
+        try {
+            const data = await dataSource.getRepoData();
+            const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
+            res.json(filtered);
+        } catch (error) {
+            next(error);
+        }
+    });
+
+    return router;
 }
-
-router.get(`${BASE_OVERVIEW}/repositories`, (req, res) => {
-    const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
-    res.json(filtered);
-});
-
-export default router;
