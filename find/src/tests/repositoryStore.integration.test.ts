@@ -284,6 +284,106 @@ integrationDescribe('RepositoryStore PostgreSQL integration', () => {
         ]);
     });
 
+    test('publishes contributor ETags with their list and clears them when a list is no longer reusable', async () => {
+        const university = `${testPrefix}-contributors`;
+        const repositoryId = 8_765_432_160;
+        const candidate = {
+            id: repositoryId,
+            fullName: 'contributor-owner/repository',
+            contributorCache: { etag: '"contributors-old"', logins: ['alice'] },
+        };
+        const publish = async (
+            runId: string,
+            mode: 'full' | 'refresh',
+            checkpoint: {
+                etag: string;
+                contributorsEtag?: string;
+                contributors: string[];
+            },
+        ) => {
+            await store.startOrLoadUniversityCollection(runId, university, mode);
+            await store.saveDiscoveryCheckpoint(runId, university, [candidate], []);
+            await store.saveRepositoryCheckpoint(runId, university, {
+                candidate,
+                status: 'complete',
+                record: record(university, repositoryId, {
+                    fullName: candidate.fullName,
+                    contributors: JSON.stringify(checkpoint.contributors),
+                    contributorCount: checkpoint.contributors.length,
+                }),
+                etag: checkpoint.etag,
+                ...(checkpoint.contributorsEtag
+                    ? { contributorsEtag: checkpoint.contributorsEtag }
+                    : {}),
+            });
+            return store.startOrLoadUniversityCollection(runId, university, mode);
+        };
+
+        const staged = await publish(`${testPrefix}-contributors-1`, 'full', {
+            etag: '"repository-1"',
+            contributorsEtag: '"contributors-1"',
+            contributors: ['alice', 'bob'],
+        });
+        expect(staged.candidates).toEqual([
+            expect.objectContaining({
+                candidate: expect.objectContaining({
+                    contributorCache: candidate.contributorCache,
+                }),
+                contributorsEtag: '"contributors-1"',
+            }),
+        ]);
+        await store.publishUniversityCollection(
+            `${testPrefix}-contributors-1`,
+            university,
+        );
+        expect(await store.listKnownRepositories(university)).toEqual([
+            {
+                id: repositoryId,
+                fullName: candidate.fullName,
+                etag: '"repository-1"',
+                contributorCache: {
+                    etag: '"contributors-1"',
+                    logins: ['alice', 'bob'],
+                },
+            },
+        ]);
+
+        await publish(`${testPrefix}-contributors-2`, 'refresh', {
+            etag: '"repository-2"',
+            contributors: ['alice', 'bob', 'carol'],
+        });
+        await store.publishUniversityCollection(
+            `${testPrefix}-contributors-2`,
+            university,
+        );
+        expect(await store.listKnownRepositories(university)).toEqual([
+            {
+                id: repositoryId,
+                fullName: candidate.fullName,
+                etag: '"repository-2"',
+            },
+        ]);
+
+        // Legacy Python-style list text is never revalidated.
+        await adminPool.query(
+            `UPDATE public.repository_scraping SET contributors = $3
+             WHERE university = $1 AND id = $2`,
+            [university, repositoryId, "['alice']"],
+        );
+        await adminPool.query(
+            `UPDATE public.repository_scraping_cache SET contributors_etag = '"legacy"'
+             WHERE university = $1 AND repository_id = $2`,
+            [university, repositoryId],
+        );
+        expect(await store.listKnownRepositories(university)).toEqual([
+            {
+                id: repositoryId,
+                fullName: candidate.fullName,
+                etag: '"repository-2"',
+            },
+        ]);
+    });
+
     test('cancellation before COMMIT rolls publication back and retains checkpoints', async () => {
         const university = `${testPrefix}-cancel-before-commit`;
         const runId = `${testPrefix}-cancel-before-commit-run`;
@@ -386,7 +486,7 @@ integrationDescribe('RepositoryStore PostgreSQL integration', () => {
         });
     });
 
-    test('publishes healthy records for a partial run, persists documented skips, and preserves older rows', async () => {
+    test('publishes healthy records for a partial run, keeps rows for skipped repositories that still exist, and prunes undiscovered rows', async () => {
         const university = `${testPrefix}-legal-partial`;
         const runId = `${testPrefix}-legal-run`;
         const healthyId = 8_765_432_160;
@@ -413,6 +513,13 @@ integrationDescribe('RepositoryStore PostgreSQL integration', () => {
         };
         await store.upsertUniversity(university, [
             record(university, oldId, { fullName: 'old-owner/stale' }),
+            record(university, skippedId, {
+                fullName: skippedCandidate.fullName,
+                description: 'published before the 451',
+            }),
+            record(university, contributorSkippedId, {
+                fullName: contributorSkippedCandidate.fullName,
+            }),
         ]);
         await store.startOrLoadUniversityCollection(runId, university, 'full');
         await store.saveDiscoveryCheckpoint(
@@ -463,12 +570,15 @@ integrationDescribe('RepositoryStore PostgreSQL integration', () => {
             1,
         );
         const rows = await adminPool.query(
-            'SELECT id::text FROM public.repository_scraping WHERE university = $1 ORDER BY id',
+            'SELECT id::text, description FROM public.repository_scraping WHERE university = $1 ORDER BY id',
             [university],
         );
-        expect(rows.rows.map((row) => row.id)).toEqual([
-            String(healthyId),
-            String(oldId),
+        // The skipped repositories still exist, so their earlier rows stay;
+        // the undiscovered row is pruned despite the skips.
+        expect(rows.rows).toEqual([
+            { id: String(healthyId), description: null },
+            { id: String(skippedId), description: 'published before the 451' },
+            { id: String(contributorSkippedId), description: null },
         ]);
         const published = await store.startOrLoadUniversityCollection(
             runId,
@@ -491,6 +601,206 @@ integrationDescribe('RepositoryStore PostgreSQL integration', () => {
                 },
             ],
         });
+    });
+
+    test('a full run with a skipped owner keeps that owner rows and prunes 404 and undiscovered rows with their ETags', async () => {
+        const university = `${testPrefix}-owner-skip`;
+        const runId = `${testPrefix}-owner-skip-run`;
+        const healthyId = 8_765_432_190;
+        const goneId = 8_765_432_191;
+        const ownerRowId = 8_765_432_192;
+        const staleId = 8_765_432_193;
+        const healthyCandidate = {
+            id: healthyId,
+            fullName: 'prune-owner/healthy',
+        };
+        const goneCandidate = { id: goneId, fullName: 'prune-owner/gone' };
+        await store.upsertUniversity(university, [
+            record(university, healthyId, {
+                fullName: healthyCandidate.fullName,
+            }),
+            record(university, goneId, { fullName: goneCandidate.fullName }),
+            record(university, ownerRowId, {
+                fullName: 'Skipped-Owner/listed-before',
+                owner: 'Skipped-Owner',
+            }),
+            record(university, staleId, { fullName: 'prune-owner/stale' }),
+        ]);
+        await adminPool.query(
+            `INSERT INTO public.repository_scraping_cache
+                (university, repository_id, etag, updated_at)
+             SELECT $1, id, '"etag-' || id || '"', now()
+             FROM unnest($2::BIGINT[]) AS id`,
+            [university, [healthyId, goneId, ownerRowId, staleId]],
+        );
+
+        await store.startOrLoadUniversityCollection(runId, university, 'full');
+        await store.saveDiscoveryCheckpoint(
+            runId,
+            university,
+            [healthyCandidate, goneCandidate],
+            [
+                {
+                    university,
+                    login: 'skipped-owner',
+                    ownerType: 'User',
+                    endpoint:
+                        'https://api.github.com/users/skipped-owner/repos',
+                    status: 404,
+                    reason: 'GitHub returned HTTP 404 for the owner repository listing.',
+                },
+            ],
+        );
+        await store.saveRepositoryCheckpoint(runId, university, {
+            candidate: healthyCandidate,
+            status: 'complete',
+            record: record(university, healthyId, {
+                fullName: healthyCandidate.fullName,
+            }),
+            etag: '"etag-healthy-new"',
+        });
+        await store.saveRepositoryCheckpoint(runId, university, {
+            candidate: goneCandidate,
+            status: 'skipped',
+            skippedRepository: {
+                university,
+                repositoryId: goneId,
+                repositoryName: goneCandidate.fullName,
+                endpoint: 'https://api.github.com/repos/prune-owner/gone',
+                status: 404,
+                reasonCode: 'repository_unavailable_404',
+                reason: 'GitHub returned HTTP 404 for the repository.',
+            },
+        });
+
+        expect(await store.publishUniversityCollection(runId, university)).toBe(
+            1,
+        );
+        const rows = await adminPool.query(
+            'SELECT id::text FROM public.repository_scraping WHERE university = $1 ORDER BY id',
+            [university],
+        );
+        expect(rows.rows.map((row) => row.id)).toEqual([
+            String(healthyId),
+            String(ownerRowId),
+        ]);
+        const cache = await adminPool.query(
+            'SELECT repository_id::text, etag FROM public.repository_scraping_cache WHERE university = $1 ORDER BY repository_id',
+            [university],
+        );
+        expect(cache.rows).toEqual([
+            { repository_id: String(healthyId), etag: '"etag-healthy-new"' },
+            {
+                repository_id: String(ownerRowId),
+                etag: `"etag-${ownerRowId}"`,
+            },
+        ]);
+    });
+
+    test('a full snapshot keeps unchanged repositories and their ETags while removing undiscovered ones', async () => {
+        const university = `${testPrefix}-unchanged-snapshot`;
+        const runId = `${testPrefix}-unchanged-snapshot-run`;
+        const changedId = 8_765_432_180;
+        const unchangedId = 8_765_432_181;
+        const goneId = 8_765_432_182;
+        const changedCandidate = {
+            id: changedId,
+            fullName: 'snapshot-owner/changed',
+            etag: '"changed-old"',
+        };
+        const unchangedCandidate = {
+            id: unchangedId,
+            fullName: 'snapshot-owner/unchanged',
+            etag: '"unchanged-etag"',
+        };
+        await store.upsertUniversity(university, [
+            record(university, changedId, {
+                fullName: changedCandidate.fullName,
+                stargazersCount: 1,
+            }),
+            record(university, unchangedId, {
+                fullName: unchangedCandidate.fullName,
+                description: 'published before this run',
+            }),
+            record(university, goneId, { fullName: 'snapshot-owner/gone' }),
+        ]);
+        await adminPool.query(
+            `UPDATE public.repository_scraping SET bus_factor = 3.5
+             WHERE university = $1 AND id = $2`,
+            [university, unchangedId],
+        );
+        await adminPool.query(
+            `INSERT INTO public.repository_scraping_cache
+                (university, repository_id, etag, updated_at)
+             VALUES ($1, $2, '"changed-old"', now()),
+                    ($1, $3, '"unchanged-etag"', now()),
+                    ($1, $4, '"gone-etag"', now())`,
+            [university, changedId, unchangedId, goneId],
+        );
+
+        await store.startOrLoadUniversityCollection(runId, university, 'full');
+        await store.saveDiscoveryCheckpoint(
+            runId,
+            university,
+            [changedCandidate, unchangedCandidate],
+            [],
+        );
+        await store.saveRepositoryCheckpoint(runId, university, {
+            candidate: changedCandidate,
+            status: 'complete',
+            record: record(university, changedId, {
+                fullName: changedCandidate.fullName,
+                stargazersCount: 2,
+            }),
+            etag: '"changed-new"',
+        });
+        await store.saveRepositoryCheckpoint(runId, university, {
+            candidate: unchangedCandidate,
+            status: 'unchanged',
+            etag: '"unchanged-etag"',
+        });
+
+        // Only the changed repository is rewritten; the unchanged row stays as published.
+        expect(await store.publishUniversityCollection(runId, university)).toBe(
+            1,
+        );
+        const rows = await adminPool.query(
+            `SELECT id::text, stargazers_count, description, bus_factor
+             FROM public.repository_scraping
+             WHERE university = $1 ORDER BY id`,
+            [university],
+        );
+        expect(rows.rows).toEqual([
+            expect.objectContaining({
+                id: String(changedId),
+                stargazers_count: '2',
+            }),
+            expect.objectContaining({
+                id: String(unchangedId),
+                description: 'published before this run',
+                bus_factor: 3.5,
+            }),
+        ]);
+        expect(await store.listKnownRepositories(university)).toEqual([
+            {
+                id: changedId,
+                fullName: changedCandidate.fullName,
+                etag: '"changed-new"',
+            },
+            {
+                id: unchangedId,
+                fullName: unchangedCandidate.fullName,
+                etag: '"unchanged-etag"',
+            },
+        ]);
+        const cache = await adminPool.query(
+            'SELECT repository_id::text FROM public.repository_scraping_cache WHERE university = $1 ORDER BY repository_id',
+            [university],
+        );
+        expect(cache.rows.map((row) => row.repository_id)).toEqual([
+            String(changedId),
+            String(unchangedId),
+        ]);
     });
 
     test('reproduces PostgreSQL NUL rejection and persists the normalized value', async () => {

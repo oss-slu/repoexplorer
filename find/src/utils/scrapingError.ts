@@ -136,7 +136,7 @@ function preflightMessage(failure: DatabasePreflightFailure): string {
         case 'missing-table':
             return 'Database preflight could not find public.repository_scraping';
         case 'missing-columns':
-            return 'Database preflight found missing repository_scraping columns';
+            return 'Database preflight found missing repository_scraping or checkpoint columns';
         case 'privileges':
             return 'Database preflight found insufficient application-role privileges';
     }

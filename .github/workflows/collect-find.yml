@@ -77,24 +77,23 @@ jobs:
                   fi
                   echo "mode=$selected_mode" >> "$GITHUB_OUTPUT"
 
-            - name: create GitHub App installation token
-              id: app-token
-              uses: actions/create-github-app-token@v3
-              with:
-                  app-id: ${{ secrets.FINDER_GITHUB_APP_ID }}
-                  private-key: ${{ secrets.FINDER_GITHUB_APP_PRIVATE_KEY }}
-                  owner: ${{ github.repository_owner }}
-                  permission-contents: read
+            # Anonymous requests get 60 core requests per hour, so a scheduled
+            # collection without a token cannot finish.
+            - name: require a GitHub token
+              env:
+                  FINDER_GITHUB_TOKEN: ${{ secrets.FINDER_GITHUB_TOKEN }}
+              run: |
+                  if [[ -z "$FINDER_GITHUB_TOKEN" ]]; then
+                      echo '::error::Set the FINDER_GITHUB_TOKEN repository secret to a personal access token with read access to public repositories.'
+                      exit 1
+                  fi
 
             - name: build finder
               run: npm run build --prefix find
 
             - name: collect repositories
               env:
-                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-                  FINDER_GITHUB_APP_ID: ${{ secrets.FINDER_GITHUB_APP_ID }}
-                  FINDER_GITHUB_APP_PRIVATE_KEY: ${{ secrets.FINDER_GITHUB_APP_PRIVATE_KEY }}
-                  FINDER_GITHUB_APP_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+                  GITHUB_TOKEN: ${{ secrets.FINDER_GITHUB_TOKEN }}
                   GITHUB_RUN_ID: ${{ inputs.run_id || github.run_id }}
                   MODE: ${{ steps.mode.outputs.mode }}
                   UNIVERSITY: ${{ inputs.university }}

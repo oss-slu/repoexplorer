@@ -1,6 +1,7 @@
 import { discoverRepositories } from './discoverRepositories';
 import {
-    enrichRepository,
+    createEnrichmentOptions,
+    enrichRepositoryWithEtags,
     refreshRepositoryMetadata,
 } from './enrichRepository';
 import { mapWithConcurrency } from './utils/concurrency';
@@ -290,7 +291,7 @@ async function collectUniversity(
         });
         const discovery =
             mode === 'full'
-                ? await discoverRepositories(
+                ? await discoverWithKnownEtags(
                       client,
                       university,
                       configuration.repositoryConcurrency,
@@ -305,6 +306,7 @@ async function collectUniversity(
                               observed.skippedOwners.push(owner);
                           },
                       },
+                      store,
                   )
                 : {
                       candidates: await store.listKnownRepositories(
@@ -363,6 +365,10 @@ async function collectUniversity(
             once: true,
         });
     client.setRunSignal(controller.signal);
+    const enrichmentOptions = createEnrichmentOptions(
+        client,
+        configuration.enrichmentApi,
+    );
     try {
         await mapWithConcurrency(
             candidates.filter((item) => item.status === 'pending'),
@@ -370,54 +376,56 @@ async function collectUniversity(
             async (item) => {
                 const candidate = item.candidate;
                 try {
-                    let metadata = candidate.metadata;
-                    let etag = candidate.etag;
-                    if (mode === 'refresh') {
-                        const refreshed = await refreshRepositoryMetadata(
-                            client,
-                            candidate,
+                    // Search and listing payloads lack subscribers_count, so
+                    // the detail resource is the record source in both modes.
+                    // Full discovery attaches saved ETags, so an unchanged
+                    // repository costs one free 304 in either mode.
+                    const refreshed = await refreshRepositoryMetadata(
+                        client,
+                        candidate,
+                        university.key,
+                    );
+                    if (refreshed.status === 'unchanged') {
+                        await store.saveRepositoryCheckpoint(
+                            runId,
+                            university.key,
+                            {
+                                candidate,
+                                status: 'unchanged',
+                                ...(refreshed.etag
+                                    ? { etag: refreshed.etag }
+                                    : {}),
+                            },
                         );
-                        if (refreshed.status === 'unchanged') {
-                            await store.saveRepositoryCheckpoint(
-                                runId,
-                                university.key,
-                                {
-                                    candidate,
-                                    status: 'unchanged',
-                                    ...(refreshed.etag
-                                        ? { etag: refreshed.etag }
-                                        : {}),
-                                },
-                            );
-                            completed += 1;
-                            emit({
-                                type: 'progress',
-                                phase: 'enrichment',
-                                university: university.key,
-                                completed,
-                                total: candidates.length,
-                                skipped: skippedRepositoryCount,
-                                warnings: warnings.length,
-                                label: `${candidate.fullName} (unchanged)`,
-                            });
-                            return;
-                        }
-                        metadata = refreshed.metadata;
-                        etag = refreshed.etag;
+                        completed += 1;
+                        emit({
+                            type: 'progress',
+                            phase: 'enrichment',
+                            university: university.key,
+                            completed,
+                            total: candidates.length,
+                            skipped: skippedRepositoryCount,
+                            warnings: warnings.length,
+                            label: `${candidate.fullName} (unchanged)`,
+                        });
+                        return;
                     }
+                    const etag = refreshed.etag;
 
-                    const record = await enrichRepository(
+                    const enrichment = await enrichRepositoryWithEtags(
                         client,
                         candidate,
                         university,
                         dependencies.now,
-                        metadata,
+                        refreshed.metadata,
+                        enrichmentOptions,
                     );
-                    const normalized = normalizeRepositoryText([record]);
-                    const repositoryWarnings = [
-                        ...(candidate.metadataWarnings ?? []),
-                        ...normalized.warnings,
-                    ];
+                    const normalized = normalizeRepositoryText([
+                        enrichment.record,
+                    ]);
+                    // The detail payload carries the same text as discovery,
+                    // so its normalization supersedes discovery-time warnings.
+                    const repositoryWarnings = normalized.warnings;
                     warnings.push(...repositoryWarnings);
                     observed.warnings.push(...repositoryWarnings);
                     for (const warning of repositoryWarnings) {
@@ -439,6 +447,12 @@ async function collectUniversity(
                             status: 'complete',
                             record: normalized.records[0],
                             ...(etag ? { etag } : {}),
+                            ...(enrichment.contributorsEtag
+                                ? {
+                                      contributorsEtag:
+                                          enrichment.contributorsEtag,
+                                  }
+                                : {}),
                             warnings: repositoryWarnings,
                         },
                     );
@@ -576,6 +590,45 @@ function throwStrictSkip(
             },
         );
     }
+}
+
+/**
+ * Full discovery attaches each already-published repository's saved ETags so
+ * enrichment can make conditional requests: an unchanged repository then
+ * costs a free 304 instead of a full re-enrichment, and a changed repository
+ * with an unchanged contributor list reuses the published list.
+ */
+async function discoverWithKnownEtags(
+    client: GitHubRequestClient,
+    university: UniversityConfiguration,
+    concurrency: number,
+    options: Parameters<typeof discoverRepositories>[3],
+    store: RepositoryCollectionStorePort,
+): ReturnType<typeof discoverRepositories> {
+    const discovery = await discoverRepositories(
+        client,
+        university,
+        concurrency,
+        options,
+    );
+    const known = new Map(
+        (await store.listKnownRepositories(university.key)).map(
+            (repository) => [repository.id, repository] as const,
+        ),
+    );
+    return {
+        ...discovery,
+        candidates: discovery.candidates.map((candidate) => {
+            const saved = known.get(candidate.id);
+            return {
+                ...candidate,
+                ...(saved?.etag ? { etag: saved.etag } : {}),
+                ...(saved?.contributorCache
+                    ? { contributorCache: saved.contributorCache }
+                    : {}),
+            };
+        }),
+    };
 }
 
 function resultFromCheckpoint(

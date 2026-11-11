@@ -1,6 +1,6 @@
 export * from './utils/githubRequest';
-export * from './utils/githubAppToken';
 export * from './utils/githubPagination';
+export * from './utils/repositoryGraphQLBatcher';
 export * from './config';
 export * from './discoverRepositories';
 export * from './enrichRepository';

@@ -10,7 +10,7 @@ import type {
     UniversityCollectionCheckpoint,
 } from '../types/scraping';
 import {
-    createTestClient,
+    createTestClient as createBaseTestClient,
     jsonResponse,
     searchEnvelope,
 } from './githubFixtures';
@@ -23,7 +23,41 @@ const configuration: ScrapingConfiguration = {
     databaseBatchSize: 10,
 };
 
+// Detail payloads for repositories built by `repository`, keyed by full name.
+// Search results omit subscribers_count, so the runner fetches each detail;
+// enrichment also lists each repository's root directory.
+const repositoryDetails = new Map<string, Record<string, unknown>>();
+
+beforeEach(() => repositoryDetails.clear());
+
+function createTestClient(
+    handler: Parameters<typeof createBaseTestClient>[0],
+    ...rest: Parameters<typeof createBaseTestClient> extends [unknown, ...infer R]
+        ? R
+        : never
+) {
+    return createBaseTestClient((url, init) => {
+        const detail = /^\/repos\/([^/]+\/[^/]+)(\/contents)?$/.exec(
+            url.pathname,
+        );
+        const payload = detail ? repositoryDetails.get(detail[1]) : undefined;
+        if (!payload) return handler(url, init);
+        // Fixture repositories have an empty root directory listing.
+        if (detail?.[2]) return jsonResponse([]);
+        return jsonResponse(payload, { etag: `"etag-${payload.id}"` });
+    }, ...rest);
+}
+
 function repository(id: number, fullName: string): Record<string, unknown> {
+    const payload = repositoryPayload(id, fullName);
+    repositoryDetails.set(fullName, payload);
+    return payload;
+}
+
+function repositoryPayload(
+    id: number,
+    fullName: string,
+): Record<string, unknown> {
     const [owner] = fullName.split('/');
     return {
         id,
@@ -722,7 +756,7 @@ test('keeps unknown contributor 403 fatal and does not publish in best-effort mo
     expect(result.failures[0].skippedRepositories).toEqual([]);
 });
 
-test('uses discovered repository metadata and resumes completed repository checkpoints', async () => {
+test('records repository ETags on full runs and resumes completed repository checkpoints', async () => {
     const store = new MemoryCollectionStore();
     const firstRequests: Array<{ path: string; etag?: string | null }> = [];
     const firstRun = await runCollection(configuration, {
@@ -737,12 +771,14 @@ test('uses discovered repository metadata and resumes completed repository check
     expect(firstRun.failures[0].warnings).toMatchObject([
         { field: 'description', replacementCount: 1 },
     ]);
-    expect(firstRequests.some(({ path }) => path === '/repos/slu/one')).toBe(
-        false,
-    );
     expect(
-        store.runs.get('full-101:full')?.candidates.map((item) => item.status),
-    ).toEqual(['complete', 'pending']);
+        store.runs
+            .get('full-101:full')
+            ?.candidates.map(({ status, etag }) => ({ status, etag })),
+    ).toEqual([
+        { status: 'complete', etag: '"etag-101"' },
+        { status: 'pending', etag: undefined },
+    ]);
 
     const resumeRequests: Array<{ path: string; etag?: string | null }> = [];
     const resumed = await runCollection(configuration, {
@@ -905,4 +941,232 @@ test('refresh sends the saved ETag and publishes no data when GitHub returns 304
     expect(requests).toEqual([{ path: '/repos/slu/known', etag: '"cached"' }]);
     expect(result).toMatchObject({ failed: 0, committed: 0 });
     expect(store.runs.get('refresh-201:refresh')?.status).toBe('complete');
+});
+
+function unavailableKnownRepositoryFixture(status: 404 | 451) {
+    return createTestClient((url) => {
+        if (url.pathname === '/repos/slu/kept') {
+            return new Response(null, {
+                status: 304,
+                headers: { etag: '"kept"' },
+            });
+        }
+        if (url.pathname === '/repos/slu/gone') {
+            return jsonResponse(
+                { message: status === 404 ? 'Not Found' : 'Unavailable' },
+                { 'x-github-request-id': 'REFRESH-GONE' },
+                status,
+            );
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+}
+
+test.each([
+    [404, 'repository_unavailable_404'],
+    [451, 'github_legal_restriction'],
+] as const)(
+    'best-effort refresh skips a known repository that now returns %i and publishes the rest',
+    async (status, reasonCode) => {
+        const store = new MemoryCollectionStore();
+        store.known.push(
+            { id: 301, fullName: 'slu/kept', etag: '"kept"' },
+            { id: 302, fullName: 'slu/gone', etag: '"gone"' },
+        );
+
+        const result = await runCollection(configuration, {
+            client: unavailableKnownRepositoryFixture(status),
+            store,
+            mode: 'refresh',
+            runId: `refresh-gone-${status}`,
+        });
+
+        expect(result).toMatchObject({ failed: 0, partial: 1, committed: 0 });
+        expect(store.publishCalls).toBe(1);
+        expect(result.results[0].skippedRepositories).toMatchObject([
+            {
+                repositoryId: 302,
+                status,
+                reasonCode,
+                requestId: 'REFRESH-GONE',
+            },
+        ]);
+    },
+);
+
+test('strict refresh fails on a known repository that now returns 404', async () => {
+    const store = new MemoryCollectionStore();
+    store.known.push(
+        { id: 301, fullName: 'slu/kept', etag: '"kept"' },
+        { id: 302, fullName: 'slu/gone', etag: '"gone"' },
+    );
+
+    const result = await runCollection(configuration, {
+        client: unavailableKnownRepositoryFixture(404),
+        store,
+        mode: 'refresh',
+        runId: 'strict-refresh-gone',
+        policy: 'strict',
+    });
+
+    expect(result.failed).toBe(1);
+    expect(store.publishCalls).toBe(0);
+    expect(result.failures[0].skippedRepositories).toMatchObject([
+        { repositoryId: 302, reasonCode: 'repository_unavailable_404' },
+    ]);
+});
+
+test('full discovery sends saved ETags and skips enrichment for unchanged repositories', async () => {
+    const store = new MemoryCollectionStore();
+    store.known.push({ id: 101, fullName: 'slu/one', etag: '"etag-101"' });
+    const requests: Array<{ path: string; etag?: string | null }> = [];
+    const client = createBaseTestClient((url, init) => {
+        const etag = new Headers(init.headers).get('if-none-match');
+        requests.push({ path: url.pathname, etag });
+        if (url.pathname === '/search/repositories') {
+            return jsonResponse(searchEnvelope([repository(101, 'slu/one')]));
+        }
+        if (url.pathname === '/search/users') {
+            return jsonResponse(searchEnvelope([]));
+        }
+        if (url.pathname === '/repos/slu/one' && etag === '"etag-101"') {
+            return new Response(null, {
+                status: 304,
+                headers: { etag: '"etag-101"' },
+            });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const result = await runCollection(configuration, {
+        client,
+        store,
+        mode: 'full',
+        runId: 'full-unchanged',
+        searchRetrySleep: async () => {},
+    });
+
+    expect(result).toMatchObject({ failed: 0, committed: 0 });
+    expect(
+        requests.filter(({ path }) => path.startsWith('/repos/')),
+    ).toEqual([{ path: '/repos/slu/one', etag: '"etag-101"' }]);
+    expect(store.runs.get('full-unchanged:full')?.status).toBe('complete');
+});
+
+function contributorEtagFixture(
+    requests: Array<{ path: string; etag?: string | null }>,
+    searchResults: Record<string, unknown>[] = [],
+) {
+    return createTestClient((url, init) => {
+        const etag = new Headers(init.headers).get('if-none-match');
+        requests.push({ path: url.pathname, etag });
+        if (url.pathname === '/search/repositories') {
+            return jsonResponse(searchEnvelope(searchResults));
+        }
+        if (url.pathname === '/search/users') {
+            return jsonResponse(searchEnvelope([]));
+        }
+        if (url.pathname.endsWith('/contributors')) {
+            return etag === '"contributors-201"'
+                ? new Response(null, {
+                      status: 304,
+                      headers: { etag: '"contributors-201"' },
+                  })
+                : jsonResponse([{ login: 'bob', contributions: 1 }], {
+                      etag: '"contributors-new"',
+                  });
+        }
+        if (url.pathname.endsWith('/readme')) {
+            return jsonResponse({ message: 'Not Found' }, {}, 404);
+        }
+        if (url.pathname.endsWith('/releases')) return jsonResponse([]);
+        if (url.pathname.endsWith('/community/profile')) {
+            return jsonResponse({ files: {} });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+    });
+}
+
+function captureCheckpoints(store: MemoryCollectionStore) {
+    const saved: RepositoryCollectionCheckpoint[] = [];
+    const save = store.saveRepositoryCheckpoint.bind(store);
+    store.saveRepositoryCheckpoint = async (runId, university, checkpoint) => {
+        saved.push(structuredClone(checkpoint));
+        await save(runId, university, checkpoint);
+    };
+    return saved;
+}
+
+test('refresh of a changed repository reuses an unchanged contributor list via 304', async () => {
+    repository(201, 'slu/known');
+    const store = new MemoryCollectionStore();
+    store.known.push({
+        id: 201,
+        fullName: 'slu/known',
+        etag: '"stale"',
+        contributorCache: { etag: '"contributors-201"', logins: ['alice'] },
+    });
+    const saved = captureCheckpoints(store);
+    const requests: Array<{ path: string; etag?: string | null }> = [];
+
+    const result = await runCollection(configuration, {
+        client: contributorEtagFixture(requests),
+        store,
+        mode: 'refresh',
+        runId: 'refresh-contributors',
+    });
+
+    expect(result).toMatchObject({ failed: 0, committed: 1 });
+    expect(
+        requests.filter(({ path }) => path.endsWith('/contributors')),
+    ).toEqual([
+        { path: '/repos/slu/known/contributors', etag: '"contributors-201"' },
+    ]);
+    expect(saved).toEqual([
+        expect.objectContaining({
+            status: 'complete',
+            etag: '"etag-201"',
+            contributorsEtag: '"contributors-201"',
+            record: expect.objectContaining({
+                contributors: '["alice"]',
+                contributorCount: 1,
+            }),
+        }),
+    ]);
+});
+
+test('full discovery attaches the saved contributor cache to rediscovered repositories', async () => {
+    const store = new MemoryCollectionStore();
+    store.known.push({
+        id: 201,
+        fullName: 'slu/known',
+        etag: '"stale"',
+        contributorCache: { etag: '"contributors-old"', logins: ['alice'] },
+    });
+    const saved = captureCheckpoints(store);
+    const requests: Array<{ path: string; etag?: string | null }> = [];
+
+    const result = await runCollection(configuration, {
+        client: contributorEtagFixture(requests, [
+            repository(201, 'slu/known'),
+        ]),
+        store,
+        mode: 'full',
+        runId: 'full-contributors',
+        searchRetrySleep: async () => {},
+    });
+
+    expect(result).toMatchObject({ failed: 0, committed: 1 });
+    expect(
+        requests.filter(({ path }) => path.endsWith('/contributors')),
+    ).toEqual([
+        { path: '/repos/slu/known/contributors', etag: '"contributors-old"' },
+    ]);
+    expect(saved).toEqual([
+        expect.objectContaining({
+            status: 'complete',
+            contributorsEtag: '"contributors-new"',
+            record: expect.objectContaining({ contributors: '["bob"]' }),
+        }),
+    ]);
 });

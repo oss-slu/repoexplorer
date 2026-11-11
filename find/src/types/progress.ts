@@ -41,12 +41,12 @@ export type ScrapingProgressEvent =
           type: 'request-queue';
           activeRequests: number;
           queuedRequests: number;
-          waits: Partial<Record<'core' | 'search', number>>;
+          waits: Partial<Record<'core' | 'search' | 'graphql', number>>;
           elapsedMs: number;
       }
     | {
           type: 'rate-limit-wait';
-          bucket: 'core' | 'search' | 'all';
+          bucket: 'core' | 'search' | 'graphql' | 'all';
           until: number;
           reason: 'primary' | 'secondary';
           elapsedMs: number;

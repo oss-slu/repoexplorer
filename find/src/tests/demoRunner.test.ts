@@ -63,7 +63,7 @@ function createEnrichmentClient(options: {
         if (url.pathname.endsWith('/community/profile')) {
             return jsonResponse({ files: {} });
         }
-        if (url.pathname.includes('/contents/')) {
+        if (/\/contents(\/|$)/.test(url.pathname)) {
             return jsonResponse({ message: 'Not Found' }, {}, 404);
         }
         throw new Error(`Unexpected demo request: ${url.pathname}`);
@@ -207,7 +207,7 @@ test('preserves cancellation during enrichment as an interrupted demo', async ()
         if (url.pathname.endsWith('/community/profile')) {
             return jsonResponse({ files: {} });
         }
-        if (url.pathname.includes('/contents/')) {
+        if (/\/contents(\/|$)/.test(url.pathname)) {
             return jsonResponse({ message: 'Not Found' }, {}, 404);
         }
         throw new Error(`Unexpected demo request: ${url.pathname}`);

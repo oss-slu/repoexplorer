@@ -6,12 +6,7 @@ import {
     loadEnvironmentFile,
 } from '../utils/environment';
 
-const variableNames = [
-    'GITHUB_TOKEN',
-    'FINDER_GITHUB_APP_ID',
-    'FINDER_GITHUB_APP_PRIVATE_KEY',
-    'FINDER_GITHUB_APP_INSTALLATION_ID',
-] as const;
+const variableNames = ['GITHUB_TOKEN'] as const;
 const originalEnvironment = new Map(
     variableNames.map((name) => [name, process.env[name]]),
 );
@@ -94,21 +89,4 @@ test('reports no credential when neither source defines a token', async () => {
             usable: false,
         });
     });
-});
-
-test('reports the active GitHub App provider without exposing its settings', () => {
-    process.env.FINDER_GITHUB_APP_ID = 'app-id-secret';
-    process.env.FINDER_GITHUB_APP_PRIVATE_KEY = 'private-key-secret';
-    process.env.FINDER_GITHUB_APP_INSTALLATION_ID = 'installation-secret';
-    const state = getGitHubCredentialState({
-        source: 'none',
-        configured: false,
-        usable: false,
-    });
-    expect(state).toEqual({
-        source: 'github-app',
-        configured: true,
-        usable: true,
-    });
-    expect(JSON.stringify(state)).not.toContain('secret');
 });

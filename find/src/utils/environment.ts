@@ -1,26 +1,16 @@
 import { config as loadDotEnv } from 'dotenv';
 
-export type GitHubCredentialSource =
-    | 'environment'
-    | 'root-env-file'
-    | 'github-app'
-    | 'none';
+export type GitHubCredentialSource = 'environment' | 'root-env-file' | 'none';
 
 export type GitHubCredentialState = {
     source: GitHubCredentialSource;
-    /** Provider used to refresh an initial token from the environment or dotenv. */
-    refreshProvider?: 'github-app';
-    /** Whether a token variable or complete provider configuration is present. */
+    /** Whether a token variable is present. */
     configured: boolean;
-    /** Whether the configured token/provider has non-empty credential material. */
+    /** Whether the configured token has non-empty credential material. */
     usable: boolean;
 };
 
-export type GitHubTokenProvenance = {
-    source: Exclude<GitHubCredentialSource, 'github-app'>;
-    configured: boolean;
-    usable: boolean;
-};
+export type GitHubTokenProvenance = GitHubCredentialState;
 
 /** Load the root environment with the same no-overwrite precedence as collection. */
 export function loadEnvironmentFile(
@@ -64,22 +54,6 @@ export function getCurrentTokenProvenance(): GitHubTokenProvenance {
 export function getGitHubCredentialState(
     provenance: GitHubTokenProvenance,
 ): GitHubCredentialState {
-    const appId = process.env.FINDER_GITHUB_APP_ID?.trim();
-    const privateKey = process.env.FINDER_GITHUB_APP_PRIVATE_KEY?.trim();
-    const installationId =
-        process.env.FINDER_GITHUB_APP_INSTALLATION_ID?.trim();
-    const hasAnyAppSetting = Boolean(appId || privateKey || installationId);
-    if (hasAnyAppSetting) {
-        const appConfigured = Boolean(appId && privateKey && installationId);
-        return {
-            source: appConfigured && provenance.usable ? provenance.source : 'github-app',
-            ...(appConfigured && provenance.usable
-                ? { refreshProvider: 'github-app' as const }
-                : {}),
-            configured: true,
-            usable: appConfigured,
-        };
-    }
     return {
         source: provenance.source,
         configured: provenance.configured,

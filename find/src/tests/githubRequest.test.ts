@@ -456,32 +456,6 @@ describe('GitHubRequestClient', () => {
         expect(result.headers.get('x-github-request-id')).toBe('request-1');
     });
 
-    test('uses the current token provider value for each request', async () => {
-        const fetchMock = createFetchMock().mockImplementation(async () =>
-            jsonResponse({ ok: true }),
-        );
-        const tokens = ['first-token', 'renewed-token'];
-        const tokenProvider = async () => tokens.shift() ?? 'renewed-token';
-        const client = createClient(fetchMock, {
-            token: 'initial-token',
-            tokenProvider,
-        });
-
-        await client.request('/user');
-        await client.request('/user');
-
-        expect(
-            new Headers(fetchMock.mock.calls[0][1]?.headers).get(
-                'Authorization',
-            ),
-        ).toBe('Bearer first-token');
-        expect(
-            new Headers(fetchMock.mock.calls[1][1]?.headers).get(
-                'Authorization',
-            ),
-        ).toBe('Bearer renewed-token');
-    });
-
     test('documents default UTF-8 decoding for bytes sent to raw-text endpoints', async () => {
         const binaryResponse = new Response(
             Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x00]),
@@ -1778,24 +1752,4 @@ describe('paginateGitHub', () => {
             paginateGitHub(client, '/orgs/octo-org/repos'),
         ).rejects.toBeInstanceOf(GitHubPaginationError);
     });
-});
-
-test('provider rejection is terminal and never leaks its underlying error', async () => {
-    const fetchMock = createFetchMock();
-    let tokenAttempts = 0;
-    const client = new GitHubRequestClient({
-        fetch: fetchMock,
-        maxRetries: 3,
-        tokenProvider: async () => {
-            tokenAttempts++;
-            throw new Error('HTTP 403 provider-secret-sentinel');
-        },
-    });
-    await expect(client.request('/orgs/oss-slu/repos')).rejects.toMatchObject({
-        name: 'GitHubCredentialProviderError',
-        message:
-            'Could not obtain GitHub credentials; check the credential provider configuration and authentication.',
-    });
-    expect(tokenAttempts).toBe(1);
-    expect(fetchMock).not.toHaveBeenCalled();
 });

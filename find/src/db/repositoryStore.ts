@@ -3,6 +3,7 @@ import type {
     CollectionMode,
     RepositoryCandidate,
     RepositoryCollectionCheckpoint,
+    RepositoryContributorCache,
     RepositoryScrapingRecord,
     ScrapingWarning,
     SkippedOwner,
@@ -57,6 +58,12 @@ export const REQUIRED_REPOSITORY_SCRAPING_COLUMNS = [
 
 const INSERT_COLUMNS = REQUIRED_REPOSITORY_SCRAPING_COLUMNS;
 
+/** Checkpoint-table columns added after the tables were first created. */
+const REQUIRED_CHECKPOINT_COLUMNS = [
+    ['repository_scraping_cache', 'contributors_etag'],
+    ['repository_scraping_run_repositories', 'contributors_etag'],
+] as const;
+
 const UPDATE_COLUMNS = INSERT_COLUMNS.filter(
     (column) =>
         column !== 'university' &&
@@ -99,15 +106,34 @@ export class RepositoryStore implements RepositoryCollectionStorePort {
                 throw new ScrapingDatabasePreflightError('missing-table');
             }
 
-            const columnResult = await client.query<{ column_name: string }>(
-                `SELECT column_name
+            const columnResult = await client.query<{
+                table_name: string;
+                column_name: string;
+            }>(
+                `SELECT table_name, column_name
                  FROM information_schema.columns
-                 WHERE table_schema = 'public' AND table_name = 'repository_scraping'`,
+                 WHERE table_schema = 'public'
+                   AND table_name IN (
+                       'repository_scraping',
+                       'repository_scraping_cache',
+                       'repository_scraping_run_repositories'
+                   )`,
             );
             const existingColumns = new Set(
-                columnResult.rows.map((row) => row.column_name),
+                columnResult.rows.map(
+                    (row) => `${row.table_name}.${row.column_name}`,
+                ),
             );
-            if (INSERT_COLUMNS.some((column) => !existingColumns.has(column))) {
+            if (
+                INSERT_COLUMNS.some(
+                    (column) =>
+                        !existingColumns.has(`repository_scraping.${column}`),
+                ) ||
+                REQUIRED_CHECKPOINT_COLUMNS.some(
+                    ([table, column]) =>
+                        !existingColumns.has(`${table}.${column}`),
+                )
+            ) {
                 throw new ScrapingDatabasePreflightError('missing-columns');
             }
 
@@ -221,10 +247,12 @@ export class RepositoryStore implements RepositoryCollectionStorePort {
                 status: RepositoryCollectionCheckpoint['status'];
                 record: unknown;
                 etag: string | null;
+                contributors_etag: string | null;
                 skipped_repository: unknown;
                 warnings: unknown;
             }>(
-                `SELECT candidate, status, record, etag, skipped_repository, warnings
+                `SELECT candidate, status, record, etag, contributors_etag,
+                        skipped_repository, warnings
                  FROM public.repository_scraping_run_repositories
                  WHERE run_id = $1 AND university = $2
                  ORDER BY repository_id`,
@@ -235,6 +263,9 @@ export class RepositoryStore implements RepositoryCollectionStorePort {
                 status: row.status,
                 ...(row.record ? { record: row.record as RepositoryScrapingRecord } : {}),
                 ...(row.etag ? { etag: row.etag } : {}),
+                ...(row.contributors_etag
+                    ? { contributorsEtag: row.contributors_etag }
+                    : {}),
                 ...(row.skipped_repository
                     ? { skippedRepository: row.skipped_repository as SkippedRepository }
                     : {}),
@@ -274,8 +305,11 @@ export class RepositoryStore implements RepositoryCollectionStorePort {
             full_name: string | null;
             html_url: string | null;
             etag: string | null;
+            contributors: string | null;
+            contributors_etag: string | null;
         }>(
-            `SELECT repository.id::text, repository.full_name, repository.html_url, cache.etag
+            `SELECT repository.id::text, repository.full_name, repository.html_url,
+                    cache.etag, repository.contributors, cache.contributors_etag
              FROM public.repository_scraping AS repository
              LEFT JOIN public.repository_scraping_cache AS cache
                ON cache.university = repository.university
@@ -295,10 +329,14 @@ export class RepositoryStore implements RepositoryCollectionStorePort {
                     `Known repository ${id} has no full_name or usable GitHub URL`,
                 );
             }
+            const contributorCache = row.contributors_etag
+                ? parseContributorCache(row.contributors_etag, row.contributors)
+                : undefined;
             return {
                 id,
                 fullName,
                 ...(row.etag ? { etag: row.etag } : {}),
+                ...(contributorCache ? { contributorCache } : {}),
             };
         });
     }
@@ -359,6 +397,7 @@ export class RepositoryStore implements RepositoryCollectionStorePort {
                  etag = $6,
                  skipped_repository = $7::JSONB,
                  warnings = $8::JSONB,
+                 contributors_etag = $9,
                  updated_at = now()
              WHERE run_id = $1 AND university = $2 AND repository_id = $3`,
             [
@@ -372,6 +411,9 @@ export class RepositoryStore implements RepositoryCollectionStorePort {
                     ? JSON.stringify(checkpoint.skippedRepository)
                     : null,
                 JSON.stringify(checkpoint.warnings ?? []),
+                checkpoint.status === 'complete'
+                    ? (checkpoint.contributorsEtag ?? null)
+                    : null,
             ],
         );
         if (result.rowCount !== 1) {
@@ -422,10 +464,12 @@ export class RepositoryStore implements RepositoryCollectionStorePort {
                 status: RepositoryCollectionCheckpoint['status'];
                 record: unknown;
                 etag: string | null;
+                contributors_etag?: string | null;
                 skipped_repository: unknown;
                 warnings: unknown;
             }>(
-                `SELECT repository_id::TEXT, status, record, etag, skipped_repository, warnings
+                `SELECT repository_id::TEXT, status, record, etag, contributors_etag,
+                        skipped_repository, warnings
                  FROM public.repository_scraping_run_repositories
                  WHERE run_id = $1 AND university = $2
                  ORDER BY repository_id FOR UPDATE`,
@@ -471,50 +515,77 @@ export class RepositoryStore implements RepositoryCollectionStorePort {
                 }
             }
             for (const item of checkpointResult.rows) {
-                if (item.status === 'complete' && item.etag) {
-                    throwIfCancelled(signal);
+                if (item.status !== 'complete') continue;
+                const contributorsEtag = item.contributors_etag ?? null;
+                throwIfCancelled(signal);
+                if (item.etag || contributorsEtag) {
+                    // The contributor ETag always follows the published list:
+                    // a stale one could revalidate an older list later.
                     await client.query(
-                        `INSERT INTO public.repository_scraping_cache
-                            (university, repository_id, etag, updated_at)
-                         VALUES ($1, $2, $3, now())
+                        `INSERT INTO public.repository_scraping_cache AS cache
+                            (university, repository_id, etag, contributors_etag, updated_at)
+                         VALUES ($1, $2, $3, $4, now())
                          ON CONFLICT (university, repository_id)
-                         DO UPDATE SET etag = EXCLUDED.etag, updated_at = now()`,
-                        [university, item.repository_id, item.etag],
+                         DO UPDATE SET etag = COALESCE(EXCLUDED.etag, cache.etag),
+                                       contributors_etag = EXCLUDED.contributors_etag,
+                                       updated_at = now()`,
+                        [university, item.repository_id, item.etag, contributorsEtag],
                     );
-                    throwIfCancelled(signal);
+                } else {
+                    await client.query(
+                        `UPDATE public.repository_scraping_cache
+                         SET contributors_etag = NULL, updated_at = now()
+                         WHERE university = $1 AND repository_id = $2
+                           AND contributors_etag IS NOT NULL`,
+                        [university, item.repository_id],
+                    );
                 }
+                throwIfCancelled(signal);
             }
-            const completeFullSnapshot =
-                run.mode === 'full' &&
-                readJsonArray<SkippedOwner>(run.skipped_owners).length === 0 &&
-                checkpointResult.rows.every((item) => item.status === 'complete');
-            if (completeFullSnapshot) {
+            if (run.mode === 'full') {
+                // Every candidate has a terminal checkpoint, so discovery is
+                // complete except for skipped owners, whose repositories
+                // could not be listed. Keep their rows, rows confirmed by a
+                // conditional 304, and rows for skipped repositories that
+                // still exist; a repository-detail 404 means the repository
+                // is gone or no longer public.
+                const skippedOwnerLogins = readJsonArray<SkippedOwner>(
+                    run.skipped_owners,
+                ).map((owner) => owner.login.toLowerCase());
                 await client.query(
                     `DELETE FROM public.repository_scraping AS repository
                      WHERE repository.university = $1
+                       AND lower(repository.owner) <> ALL($3::TEXT[])
                        AND NOT EXISTS (
                            SELECT 1
                            FROM public.repository_scraping_run_repositories AS checkpoint
                            WHERE checkpoint.run_id = $2
                              AND checkpoint.university = $1
                              AND checkpoint.repository_id = repository.id
-                             AND checkpoint.status = 'complete'
+                             AND (
+                                 checkpoint.status IN ('complete', 'unchanged')
+                                 OR (
+                                     checkpoint.status = 'skipped'
+                                     AND checkpoint.skipped_repository->>'reasonCode'
+                                         <> 'repository_unavailable_404'
+                                 )
+                             )
                        )`,
-                    [university, runId],
+                    [university, runId, skippedOwnerLogins],
                 );
                 throwIfCancelled(signal);
+                // ETags are written only for published rows, so they follow
+                // the rows that remain.
                 await client.query(
                     `DELETE FROM public.repository_scraping_cache AS cache
                      WHERE cache.university = $1
                        AND NOT EXISTS (
                            SELECT 1
-                           FROM public.repository_scraping_run_repositories AS checkpoint
-                           WHERE checkpoint.run_id = $2
-                             AND checkpoint.university = $1
-                             AND checkpoint.repository_id = cache.repository_id
-                             AND checkpoint.status = 'complete'
+                           FROM public.repository_scraping AS repository
+                           WHERE repository.university = $1
+                             AND repository.id = cache.repository_id
                        )`,
-                    [university, runId],
+                    [university],
                 );
                 throwIfCancelled(signal);
             }
@@ -598,7 +669,11 @@ export class RepositoryStore implements RepositoryCollectionStorePort {
             }
             // Acquire the entire selected set before any checkpoint writes.
             // Bigint locks occupy a separate key space from the legacy pair.
-            for (const university of [...new Set(universities)].sort()) {
+            // Code-unit order is locale-independent, so every collector
+            // acquires overlapping keys in the same order.
+            for (const university of [...new Set(universities)].sort(
+                compareCodeUnits,
+            )) {
                 const result = await client.query<{ acquired: boolean }>(
                     'SELECT pg_try_advisory_lock(hashtextextended($1::text, 731948)) AS acquired',
                     [university],
@@ -987,7 +1062,50 @@ function parseStoredCandidate(value: unknown): RepositoryCandidate {
               }
             : {}),
         ...(typeof candidate.etag === 'string' ? { etag: candidate.etag } : {}),
+        ...(Object.hasOwn(candidate, 'contributorCache')
+            ? { contributorCache: parseStoredContributorCache(candidate.contributorCache) }
+            : {}),
     };
+}
+
+/**
+ * Pairs a saved contributor ETag with the published list. Lists that are not
+ * a JSON array of logins, such as legacy Python-style text, are not reused.
+ */
+function parseContributorCache(
+    etag: string,
+    contributors: string | null,
+): RepositoryContributorCache | undefined {
+    if (contributors === null) return undefined;
+    let logins: unknown;
+    try {
+        logins = JSON.parse(contributors) as unknown;
+    } catch {
+        return undefined;
+    }
+    return isLoginList(logins) ? { etag, logins } : undefined;
+}
+
+function parseStoredContributorCache(value: unknown): RepositoryContributorCache {
+    if (
+        value !== null &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        typeof (value as { etag?: unknown }).etag === 'string' &&
+        (value as { etag: string }).etag !== '' &&
+        isLoginList((value as { logins?: unknown }).logins)
+    ) {
+        const cache = value as RepositoryContributorCache;
+        return { etag: cache.etag, logins: [...cache.logins] };
+    }
+    throw new Error('Stored repository candidate is malformed');
+}
+
+function isLoginList(value: unknown): value is string[] {
+    return (
+        Array.isArray(value) &&
+        value.every((login) => typeof login === 'string' && login.trim() !== '')
+    );
 }
 
 function readJsonObject(value: unknown, name: string): Record<string, unknown> {
@@ -1044,6 +1162,11 @@ function deduplicateWarnings(
             ]),
         ).values(),
     ];
+}
+
+function compareCodeUnits(left: string, right: string): number {
+    if (left < right) return -1;
+    return left > right ? 1 : 0;
 }
 
 function repositoryNameFromUrl(value: string | null): string | undefined {

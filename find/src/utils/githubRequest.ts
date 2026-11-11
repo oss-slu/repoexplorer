@@ -16,7 +16,6 @@ export type GitHubQuery = URLSearchParams | Record<string, GitHubQueryValue>;
 export interface GitHubRequestConfig {
     baseUrl?: string;
     token?: string;
-    tokenProvider?: (signal?: AbortSignal) => Promise<string>;
     headers?: HeadersInit;
     timeoutMs?: number;
     maxRetries?: number;
@@ -42,7 +41,12 @@ export interface GitHubRequestOptions {
     timeoutMs?: number;
     /** Allow an empty 204 response only for endpoints whose contract documents it. */
     allowNoContent?: boolean;
+    /** POST is used only for read-only GraphQL queries, which are safe to retry. */
+    method?: GitHubRequestMethod;
+    body?: string;
 }
+
+export type GitHubRequestMethod = 'GET' | 'POST';
 
 export interface GitHubResponse<T> {
     data: T;
@@ -52,7 +56,12 @@ export interface GitHubResponse<T> {
     notModified?: boolean;
 }
 
-export type RateLimitBucket = 'core' | 'search';
+export type RateLimitBucket = 'core' | 'search' | 'graphql';
+const RATE_LIMIT_BUCKETS: readonly RateLimitBucket[] = [
+    'core',
+    'search',
+    'graphql',
+];
 export type GitHubAccessReason =
     | 'sso-required'
     | 'token-resource-inaccessible'
@@ -137,18 +146,8 @@ class TransientAttemptError extends Error {
     }
 }
 
-/** Safe terminal failure while obtaining request credentials. */
-export class GitHubCredentialProviderError extends Error {
-    constructor() {
-        super(
-            'Could not obtain GitHub credentials; check the credential provider configuration and authentication.',
-        );
-        this.name = 'GitHubCredentialProviderError';
-    }
-}
-
 export class GitHubRequestError extends Error {
-    readonly method = 'GET';
+    readonly method: GitHubRequestMethod;
     readonly requestId?: string;
     readonly classification: GitHubErrorClassification;
     readonly rateLimit?: GitHubRateLimitDiagnostics;
@@ -183,10 +182,12 @@ export class GitHubRequestError extends Error {
             apiOrigin?: string;
             apiBasePath?: string;
             retryStopReason?: string;
+            method?: GitHubRequestMethod;
         } = {},
     ) {
         super(message);
         this.name = 'GitHubRequestError';
+        this.method = details.method ?? 'GET';
         this.attemptCount = details.attemptCount ?? 1;
         this.requestId = details.requestId;
         this.classification = details.classification ?? 'other';
@@ -200,6 +201,52 @@ export class GitHubRequestError extends Error {
         this.apiOrigin = details.apiOrigin ?? safeOrigin(url);
         this.apiBasePath = details.apiBasePath ?? '';
         this.retryStopReason = details.retryStopReason;
+    }
+}
+
+export interface GitHubGraphQLErrorEntry {
+    type?: string;
+    message: string;
+    path: readonly (string | number)[];
+}
+
+export interface GitHubGraphQLResponse<T> {
+    data: T;
+    /** Errors GitHub attributed to a field path; their fields resolve to null. */
+    errors: GitHubGraphQLErrorEntry[];
+    requestId?: string;
+    url: string;
+}
+
+/**
+ * A GraphQL response that cannot be attributed to individual fields: no
+ * data, an unattributed error, or a malformed envelope. Query-validation
+ * failures carry `validation`, which marks a query defect rather than a
+ * transient service failure. Error messages are not retained.
+ */
+export class GitHubGraphQLError extends GitHubRequestError {
+    constructor(
+        readonly errorTypes: readonly string[],
+        readonly validation: boolean,
+        response: GitHubResponse<unknown>,
+    ) {
+        super(
+            validation
+                ? 'GitHub rejected the GraphQL query'
+                : 'GitHub GraphQL query failed without field-level results',
+            response.status,
+            null,
+            response.headers,
+            response.url,
+            {
+                requestId: safeRequestId(
+                    response.headers.get('x-github-request-id'),
+                ),
+                method: 'POST',
+                apiOrigin: safeOrigin(response.url),
+            },
+        );
+        this.name = 'GitHubGraphQLError';
     }
 }
 
@@ -350,8 +397,8 @@ class GitHubRequestQueue {
             return;
         }
 
-        const buckets: RateLimitBucket[] =
-            bucket === 'all' ? ['core', 'search'] : [bucket];
+        const buckets: readonly RateLimitBucket[] =
+            bucket === 'all' ? RATE_LIMIT_BUCKETS : [bucket];
         for (const target of buckets) {
             this.cooldownUntil.set(
                 target,
@@ -441,7 +488,7 @@ class GitHubRequestQueue {
     private getState(): GitHubRequestQueueState {
         const now = this.now();
         const waits: Partial<Record<RateLimitBucket, number>> = {};
-        for (const bucket of ['core', 'search'] as const) {
+        for (const bucket of RATE_LIMIT_BUCKETS) {
             const until = this.cooldownUntil.get(bucket) ?? 0;
             if (until > now) waits[bucket] = until;
         }
@@ -464,6 +511,7 @@ export class GitHubRequestClient {
     private readonly baseUrl: string;
     private readonly apiOrigin: string;
     private readonly apiBasePath: string;
+    private readonly graphqlPath: string;
     private readonly defaultHeaders: Headers;
     private readonly timeoutMs: number;
     private readonly maxRetries: number;
@@ -473,7 +521,6 @@ export class GitHubRequestClient {
     private readonly retryBaseDelayMs: number;
     private readonly retryMaxDelayMs: number;
     private readonly fetchImplementation: typeof globalThis.fetch;
-    private readonly tokenProvider?: (signal?: AbortSignal) => Promise<string>;
     private readonly now: () => number;
     private readonly random: () => number;
     private readonly sleep: (
@@ -498,6 +545,8 @@ export class GitHubRequestClient {
         }
         this.apiOrigin = parsedBaseUrl.origin;
         this.apiBasePath = trimTrailingSlashes(parsedBaseUrl.pathname);
+        // GitHub Enterprise Server serves REST under /api/v3 and GraphQL at /api/graphql.
+        this.graphqlPath = `${this.apiBasePath.replace(/\/v3$/, '')}/graphql`;
         this.timeoutMs = validatePositiveInteger(
             config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
             'timeoutMs',
@@ -534,7 +583,6 @@ export class GitHubRequestClient {
             'concurrency',
         );
         this.fetchImplementation = config.fetch ?? globalThis.fetch;
-        this.tokenProvider = config.tokenProvider;
         this.now = config.now ?? Date.now;
         this.random = config.random ?? Math.random;
         this.sleep = config.sleep ?? abortableSleep;
@@ -575,10 +623,17 @@ export class GitHubRequestClient {
         options: GitHubRequestOptions = {},
     ): Promise<GitHubResponse<T | string>> {
         const url = createRequestUrl(this.baseUrl, endpoint, options.query);
-        const bucket = getBucketFromPath(
-            url.pathname,
-            new URL(this.baseUrl).pathname,
-        );
+        const bucket =
+            url.pathname === this.graphqlPath
+                ? 'graphql'
+                : getBucketFromPath(
+                      url.pathname,
+                      new URL(this.baseUrl).pathname,
+                  );
+        const method = options.method ?? 'GET';
+        if (method !== 'GET' && bucket !== 'graphql') {
+            throw new TypeError('Only GitHub GraphQL queries may use POST');
+        }
         const requestHeaders = new Headers(this.defaultHeaders);
         mergeHeaders(requestHeaders, options.headers);
         const timeoutMs = validatePositiveInteger(
@@ -611,9 +666,10 @@ export class GitHubRequestClient {
                         bucket,
                         attempts,
                         rateLimitRetries + 1,
-                        this.tokenProvider,
                         options.allowNoContent ?? false,
                         hasConditionalRequest,
+                        method,
+                        options.body,
                     ),
                 );
 
@@ -710,9 +766,10 @@ export class GitHubRequestClient {
         requestBucket: RateLimitBucket,
         attemptCount: number,
         rateLimitAttempt: number,
-        tokenProvider: ((signal?: AbortSignal) => Promise<string>) | undefined,
         allowNoContent: boolean,
         hasConditionalRequest: boolean,
+        method: GitHubRequestMethod,
+        body: string | undefined,
     ): Promise<AttemptResult> {
         const requestedUrl = new URL(url);
         const controller = new AbortController();
@@ -735,23 +792,13 @@ export class GitHubRequestClient {
             let rawBody: string;
             try {
                 const attemptHeaders = new Headers(headers);
-                if (tokenProvider) {
-                    let token: string;
-                    try {
-                        token = await tokenProvider(controller.signal);
-                    } catch {
-                        if (controller.signal.aborted)
-                            throw controller.signal.reason;
-                        throw new GitHubCredentialProviderError();
-                    }
-                    attemptHeaders.set('Authorization', `Bearer ${token}`);
-                }
                 let currentUrl = new URL(requestedUrl);
                 const visited = new Set([currentUrl.href]);
                 let redirectHops = 0;
                 while (true) {
                     response = await this.fetchImplementation(currentUrl, {
-                        method: 'GET',
+                        method,
+                        ...(body === undefined ? {} : { body }),
                         headers: attemptHeaders,
                         signal: controller.signal,
                         redirect: 'manual',
@@ -835,7 +882,6 @@ export class GitHubRequestClient {
                 rawBody = await response.text();
                 finalUrl = currentUrl;
             } catch (cause) {
-                if (cause instanceof GitHubCredentialProviderError) throw cause;
                 if (cause instanceof GitHubRedirectError) throw cause;
                 if (callerSignal?.aborted) {
                     throw createAbortError(callerSignal);
@@ -899,6 +945,63 @@ export class GitHubRequestClient {
                 ...(response.status === 304 ? { notModified: true } : {}),
             };
 
+            const graphQLRateLimitMessage =
+                response.status === 200 && requestBucket === 'graphql'
+                    ? findGraphQLRateLimitMessage(data)
+                    : undefined;
+            if (graphQLRateLimitMessage !== undefined) {
+                // GraphQL reports quota exhaustion as HTTP 200 with a
+                // RATE_LIMITED error, so it joins the HTTP rate-limit path.
+                const rateLimit = getRateLimitDecision(
+                    response.status,
+                    response.headers,
+                    { message: graphQLRateLimitMessage },
+                    this.now(),
+                    rateLimitAttempt,
+                    requestBucket,
+                    this.rateLimitResetBufferMs,
+                    this.retryBaseDelayMs,
+                    this.retryMaxDelayMs,
+                    true,
+                );
+                if (rateLimit) {
+                    const pauseBucket =
+                        rateLimit.diagnostics.classification ===
+                        'primary rate limit'
+                            ? rateLimit.diagnostics.bucket
+                            : 'all';
+                    this.emitRateLimitWait(
+                        pauseBucket,
+                        rateLimit.until,
+                        pauseBucket === 'all' ? 'secondary' : 'primary',
+                    );
+                    this.queue.pause(pauseBucket, rateLimit.until);
+                    return {
+                        error: new GitHubRequestError(
+                            'GitHub GraphQL request was rate limited',
+                            response.status,
+                            null,
+                            response.headers,
+                            finalUrl.toString(),
+                            {
+                                attemptCount,
+                                requestId: safeRequestId(
+                                    response.headers.get('x-github-request-id'),
+                                ),
+                                classification:
+                                    rateLimit.diagnostics.classification,
+                                rateLimit: rateLimit.diagnostics,
+                                requestedUrl: requestedUrl.toString(),
+                                apiOrigin: this.apiOrigin,
+                                apiBasePath: this.apiBasePath,
+                                method,
+                            },
+                        ),
+                        rateLimit,
+                    };
+                }
+            }
+
             if (
                 response.status === 200 ||
                 isConditionalNotModified ||
@@ -959,6 +1062,7 @@ export class GitHubRequestClient {
                     requestedUrl: requestedUrl.toString(),
                     apiOrigin: this.apiOrigin,
                     apiBasePath: this.apiBasePath,
+                    method,
                     ...(response.status === 403
                         ? {
                               accessReason: rateLimit
@@ -1050,6 +1154,33 @@ export class GitHubRequestClient {
         });
     }
 
+    /**
+     * Runs a read-only GraphQL query in the `graphql` quota bucket. Errors
+     * with a `path` are returned for the caller to attribute; an envelope with
+     * only pathless errors cannot be attributed and throws.
+     */
+    async graphql<T = unknown>(
+        query: string,
+        variables: Record<string, unknown>,
+        options: Pick<GitHubRequestOptions, 'signal' | 'timeoutMs'> = {},
+    ): Promise<GitHubGraphQLResponse<T>> {
+        const response = await this.request<unknown>(
+            `${this.apiOrigin}${this.graphqlPath}`,
+            {
+                ...options,
+                method: 'POST',
+                body: JSON.stringify({ query, variables }),
+                headers: { 'Content-Type': 'application/json' },
+            },
+        );
+        return parseGraphQLEnvelope<T>(response);
+    }
+
+    /** GraphQL rejects anonymous requests, so callers fall back to REST without credentials. */
+    isAuthenticated(): boolean {
+        return this.defaultHeaders.has('Authorization');
+    }
+
     /** Set the active scrape's signal; scrapes sharing this client run serially. */
     setRunSignal(signal?: AbortSignal): void {
         this.runSignal = signal;
@@ -1138,8 +1269,8 @@ function getBucketFromResource(
     fallback: RateLimitBucket,
 ): RateLimitBucket {
     const resource = headers.get('x-ratelimit-resource')?.toLowerCase();
-    if (resource === 'search') {
-        return 'search';
+    if (resource === 'search' || resource === 'graphql') {
+        return resource;
     }
     return resource ? 'core' : fallback;
 }
@@ -1178,6 +1309,90 @@ function parseResponseBody(
             requestId,
         );
     }
+}
+
+function findGraphQLRateLimitMessage(data: unknown): string | undefined {
+    if (data === null || typeof data !== 'object' || !('errors' in data)) {
+        return undefined;
+    }
+    const errors = (data as { errors?: unknown }).errors;
+    if (!Array.isArray(errors)) return undefined;
+    for (const error of errors) {
+        if (
+            error !== null &&
+            typeof error === 'object' &&
+            (error as { type?: unknown }).type === 'RATE_LIMITED'
+        ) {
+            const message = (error as { message?: unknown }).message;
+            return typeof message === 'string' ? message : '';
+        }
+    }
+    return undefined;
+}
+
+function parseGraphQLEnvelope<T>(
+    response: GitHubResponse<unknown>,
+): GitHubGraphQLResponse<T> {
+    const body = response.data;
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+        throw new GitHubGraphQLError([], false, response);
+    }
+    const envelope = body as { data?: unknown; errors?: unknown };
+    if (envelope.errors !== undefined && !Array.isArray(envelope.errors)) {
+        throw new GitHubGraphQLError([], false, response);
+    }
+    const rawErrors = (envelope.errors ?? []) as unknown[];
+    const errors: GitHubGraphQLErrorEntry[] = [];
+    const types: string[] = [];
+    let attributable = true;
+    let validation = false;
+    for (const value of rawErrors) {
+        const error =
+            value !== null && typeof value === 'object'
+                ? (value as Record<string, unknown>)
+                : {};
+        const type = typeof error.type === 'string' ? error.type : undefined;
+        if (type) types.push(type);
+        const extensions = error.extensions;
+        if (
+            extensions !== null &&
+            typeof extensions === 'object' &&
+            typeof (extensions as { code?: unknown }).code === 'string'
+        ) {
+            validation = true;
+        }
+        const path = error.path;
+        if (
+            Array.isArray(path) &&
+            path.length > 0 &&
+            path.every(
+                (part) => typeof part === 'string' || typeof part === 'number',
+            )
+        ) {
+            errors.push({
+                ...(type ? { type } : {}),
+                message: typeof error.message === 'string' ? error.message : '',
+                path: path as (string | number)[],
+            });
+        } else {
+            attributable = false;
+        }
+    }
+    if (
+        validation ||
+        !attributable ||
+        envelope.data === null ||
+        typeof envelope.data !== 'object' ||
+        Array.isArray(envelope.data)
+    ) {
+        throw new GitHubGraphQLError(types, validation, response);
+    }
+    return {
+        data: envelope.data as T,
+        errors,
+        requestId: safeRequestId(response.headers.get('x-github-request-id')),
+        url: response.url,
+    };
 }
 
 function describeHttpError(status: number): string {
@@ -1227,8 +1442,11 @@ function getRateLimitDecision(
     resetBufferMs: number,
     retryBaseDelayMs: number,
     retryMaxDelayMs: number,
+    graphQLRateLimited = false,
 ): RateLimitDecision | undefined {
-    if (status !== 403 && status !== 429) return undefined;
+    if (status !== 403 && status !== 429 && !graphQLRateLimited) {
+        return undefined;
+    }
     const remaining = parseSafeInteger(headers.get('x-ratelimit-remaining'));
     const message = getErrorMessage(data);
     const resetAt = parseRateLimitResetAt(
@@ -1247,8 +1465,14 @@ function getRateLimitDecision(
     let classification: GitHubRateLimitDiagnostics['classification'];
     if (primaryLimit && !secondaryMessage) {
         classification = 'primary rate limit';
-    } else if (status === 429 || (status === 403 && secondaryLimit)) {
+    } else if (
+        status === 429 ||
+        (status === 403 && secondaryLimit) ||
+        (graphQLRateLimited && secondaryMessage)
+    ) {
         classification = 'secondary rate limit';
+    } else if (graphQLRateLimited) {
+        classification = 'primary rate limit';
     } else {
         return undefined;
     }

@@ -22,6 +22,27 @@ describe('scraping configuration', () => {
         });
     });
 
+    test('accepts an explicit enrichment API and rejects unknown values', () => {
+        const universities = [
+            { key: 'SLU', fullName: 'Saint Louis University', acronym: 'SLU' },
+        ];
+        expect(
+            validateScrapingConfiguration({ universities }).enrichmentApi,
+        ).toBeUndefined();
+        expect(
+            validateScrapingConfiguration({
+                universities,
+                enrichmentApi: 'rest',
+            }).enrichmentApi,
+        ).toBe('rest');
+        expect(() =>
+            validateScrapingConfiguration({
+                universities,
+                enrichmentApi: 'soap',
+            }),
+        ).toThrow(/enrichmentApi/);
+    });
+
     test('rejects missing, duplicate, and malformed university entries', () => {
         expect(() =>
             validateScrapingConfiguration({ universities: [] }),

@@ -19,7 +19,11 @@ export type ScrapingConfiguration = {
     universities: UniversityConfiguration[];
     repositoryConcurrency: number;
     databaseBatchSize: number;
+    /** Defaults to `graphql` when the client is authenticated; `rest` restores per-repository REST reads. */
+    enrichmentApi?: EnrichmentApi;
 };
+
+export type EnrichmentApi = 'graphql' | 'rest';
 
 export type ScrapingPolicy = 'best-effort' | 'strict';
 
@@ -82,6 +86,18 @@ export type RepositoryCandidate = {
     metadataWarnings?: ScrapingWarning[];
     /** Stored entity tag used only by conditional refresh requests. */
     etag?: string;
+    /** Published contributor list and the ETag that revalidates it. */
+    contributorCache?: RepositoryContributorCache;
+};
+
+/**
+ * A published contributor list that one conditional request can revalidate.
+ * Only lists that fit in a single, non-full page are cached, because a later
+ * page can change without changing the first page's ETag.
+ */
+export type RepositoryContributorCache = {
+    etag: string;
+    logins: string[];
 };
 
 export type RepositoryCollectionCheckpoint = {
@@ -90,6 +106,8 @@ export type RepositoryCollectionCheckpoint = {
     record?: RepositoryScrapingRecord;
     skippedRepository?: SkippedRepository;
     etag?: string;
+    /** Contributor-list ETag to publish with a complete record, when reusable. */
+    contributorsEtag?: string;
     warnings?: ScrapingWarning[];
 };
 

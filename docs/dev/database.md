@@ -158,7 +158,7 @@ The implementation is in `find/src/enrichRepository.ts`; the checked-in SQL colu
 
 ### Add finder tables to an existing volume
 
-Fresh volumes create `repository_scraping` and the finder checkpoint tables through `schema.sql`. For an existing volume, apply the repeatable table/grant script as the database administrator. It creates the finder tables and grants their required privileges to the configured application role; it does not alter or truncate the three existing datasets:
+Fresh volumes create `repository_scraping` and the finder checkpoint tables through `schema.sql`. For an existing volume, apply the repeatable table/grant script as the database administrator. It creates the finder tables, adds the nullable `contributors_etag` column to `repository_scraping_cache` and `repository_scraping_run_repositories`, and grants their required privileges to the configured application role; it does not alter or truncate the three existing datasets:
 
 ```sh
 docker compose exec -T db sh -eu -c '
@@ -176,7 +176,7 @@ The script can be applied repeatedly. Keep the database container image in sync 
 
 `public.repository_scraping_runs` tracks each run and university. `public.repository_scraping_run_repositories` holds discovered candidates, completed enrichment records, and terminal unchanged or skipped states while a university is in progress. The finder publishes complete records to `repository_scraping` in one transaction only after all candidates have a terminal state, then removes that run's temporary repository checkpoints. Failed or interrupted runs retain their checkpoints for a rerun with the same run ID. The run table retains its completion summary.
 
-`public.repository_scraping_cache` stores the ETag for each repository snapshot. Weekly refreshes read it before sending `If-None-Match` and update it only when a changed repository is successfully published. The collection CLI also holds a PostgreSQL advisory lock for its full run, so independently started finder processes sharing the database cannot overlap.
+`public.repository_scraping_cache` stores the ETag for each repository snapshot. Weekly refreshes read it before sending `If-None-Match`. Full and refresh runs update it when a fetched repository is successfully published. Its `contributors_etag` revalidates the published contributor list of a changed repository; it is set only for a list that fit in one page with fewer than 100 entries and is cleared whenever a published list is not reusable. Rows migrated from before this column have `NULL` and read contributors unconditionally once. Collection preflight reports missing columns until an existing volume has this migration. `repository_scraping_run_repositories.contributors_etag` stages that value until publication. The collection CLI also holds a PostgreSQL advisory lock for its full run, so independently started finder processes sharing the database cannot overlap.
 
 ### `public.organizations`
 

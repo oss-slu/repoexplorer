@@ -1,7 +1,7 @@
 import {
     GitHubNetworkError,
-    GitHubCredentialProviderError,
     GitHubQuotaWaitBudgetError,
+    GitHubGraphQLError,
     GitHubRequestError,
     GitHubRedirectError,
     GitHubResponseParseError,
@@ -41,7 +41,7 @@ export type ScrapingDiagnostic = {
     retryStopReason?: string;
     retryAfterMs?: number;
     rateLimit?: {
-        bucket: 'core' | 'search';
+        bucket: 'core' | 'search' | 'graphql';
         classification: 'primary rate limit' | 'secondary rate limit';
         limit?: number;
         remaining?: number;
@@ -49,7 +49,7 @@ export type ScrapingDiagnostic = {
         retryAfterMs?: number;
     };
     quotaWait?: {
-        bucket: 'core' | 'search';
+        bucket: 'core' | 'search' | 'graphql';
         waitMs: number;
         budgetMs: number;
     };
@@ -147,10 +147,6 @@ export function projectScrapingDiagnostic(error: unknown): ScrapingDiagnostic {
         diagnostic.retryStopReason = 'required quota wait exceeds demo budget';
         diagnostic.remediationHint =
             'Retry the demo after GitHub quota has recovered.';
-    } else if (chain.some((item) => item instanceof GitHubCredentialProviderError)) {
-        diagnostic.category = 'credential-provider';
-        diagnostic.remediationHint =
-            'Check the GitHub App private key, App and installation IDs, and installation-token authorization.';
     } else if (repositorySkipError) {
         diagnostic.category =
             repositorySkipError.skippedRepository.reasonCode ===
@@ -178,9 +174,13 @@ export function projectScrapingDiagnostic(error: unknown): ScrapingDiagnostic {
                   : undefined;
     } else if (requestError) {
         diagnostic.category =
-            requestError.classification === 'other'
-                ? fallbackHttpCategory(requestError.status)
-                : requestError.classification;
+            requestError instanceof GitHubGraphQLError
+                ? requestError.validation
+                    ? 'graphql-query-rejected'
+                    : 'graphql-error'
+                : requestError.classification === 'other'
+                  ? fallbackHttpCategory(requestError.status)
+                  : requestError.classification;
         diagnostic.endpoint = sanitizeGitHubEndpoint(requestError.url);
         diagnostic.status = requestError.status;
         diagnostic.requestId = clean(requestError.requestId);
@@ -424,7 +424,7 @@ function accessRemediationHint(
         case 'token-resource-inaccessible':
             return 'Check the effective personal access token’s access to this resource and endpoint.';
         case 'integration-resource-inaccessible':
-            return 'Check that the GitHub App installation includes this resource and can access the endpoint.';
+            return 'GitHub reports that the integration token (such as an Actions GITHUB_TOKEN) cannot access this resource; use a personal access token with access to it.';
         case 'unknown-forbidden':
             return 'Verify the effective token and organization access with --diagnose-github; the exact cause is unconfirmed.';
         default:

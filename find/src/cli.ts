@@ -8,7 +8,6 @@ import {
     runCollection,
     type RepositoryCollectionStorePort,
 } from './collectionRunner';
-import { GitHubAppTokenProvider } from './utils/githubAppToken';
 import {
     GitHubRequestClient,
     type GitHubRequestConfig,
@@ -17,7 +16,6 @@ import {
     createConfigurationGitHubDiagnostic,
     createInterruptedGitHubDiagnostic,
     diagnoseGitHubAccess,
-    isValidOrganizationLogin,
     type GitHubAccessDiagnostic,
 } from './utils/githubDiagnostics';
 import {
@@ -73,7 +71,6 @@ export interface CliOptions {
 export interface CliRuntimeDependencies {
     tokenProvenance?: GitHubTokenProvenance;
     createRequestClient?: (config: GitHubRequestConfig) => GitHubRequestClient;
-    createAppTokenProvider?: () => GitHubAppTokenProvider | undefined;
     createAbortController?: () => AbortController;
     stdout?: Pick<NodeJS.WriteStream, 'write'> &
         Partial<Pick<ProgressOutput, 'isTTY' | 'columns'>>;
@@ -295,7 +292,6 @@ export async function runCli(
     }
     const collectionRunId =
         runId ?? (process.env.GITHUB_RUN_ID?.trim() || randomUUID());
-    const appTokenProvider = createAppTokenProviderFromEnvironment();
     const output = dependencies.stdout ?? process.stdout;
     const errorOutput = dependencies.stderr ?? process.stderr;
     let collectionRuntime: CliCollectionRuntime;
@@ -333,9 +329,6 @@ export async function runCli(
     }
     const clientConfig: GitHubRequestConfig = {
         token: process.env.GITHUB_TOKEN,
-        ...(appTokenProvider
-            ? { tokenProvider: () => appTokenProvider.getToken() }
-            : {}),
         concurrency: configuration.repositoryConcurrency,
         onProgress: renderer?.onProgress,
     };
@@ -472,12 +465,8 @@ async function runDemoCli(
         interruptionExitCode = 143;
         controller.abort(new ScrapingCancellationError('SIGTERM'));
     };
-    const appTokenProvider = createAppTokenProviderFromEnvironment();
     const clientConfig: GitHubRequestConfig = {
         token: process.env.GITHUB_TOKEN,
-        ...(appTokenProvider
-            ? { tokenProvider: (signal) => appTokenProvider.getToken(signal) }
-            : {}),
         concurrency: configuration.repositoryConcurrency,
         maxQuotaWaitMs: 5_000,
         onProgress: renderer?.onProgress,
@@ -590,29 +579,8 @@ async function runGitHubDiagnosticCli(
         return result.exitCode;
     }
 
-    let appTokenProvider: GitHubAppTokenProvider | undefined;
-    if (isValidOrganizationLogin(owner)) {
-        try {
-            appTokenProvider =
-                dependencies.createAppTokenProvider?.() ??
-                createAppTokenProviderFromEnvironment();
-        } catch {
-            const result = createConfigurationGitHubDiagnostic(
-                credential,
-                'invalid-credential-configuration',
-                'Set all three GitHub App variables together, or remove the incomplete App configuration before retrying.',
-                owner,
-            );
-            writeGitHubDiagnostic(dependencies.stdout, result.diagnostic);
-            return result.exitCode;
-        }
-    }
-
     const clientConfig: GitHubRequestConfig = {
         token: process.env.GITHUB_TOKEN,
-        ...(appTokenProvider
-            ? { tokenProvider: (signal) => appTokenProvider!.getToken(signal) }
-            : {}),
         maxRetries: 0,
         maxRateLimitRetries: 0,
     };
@@ -669,32 +637,6 @@ function writeGitHubDiagnostic(
     diagnostic: GitHubAccessDiagnostic,
 ): void {
     (output ?? process.stdout).write(`${JSON.stringify(diagnostic, null, 2)}\n`);
-}
-
-export function createAppTokenProviderFromEnvironment():
-    GitHubAppTokenProvider | undefined {
-    const appId = process.env.FINDER_GITHUB_APP_ID?.trim();
-    const privateKey = process.env.FINDER_GITHUB_APP_PRIVATE_KEY?.trim();
-    const installationId =
-        process.env.FINDER_GITHUB_APP_INSTALLATION_ID?.trim();
-    const configuredValues = [appId, privateKey, installationId].filter(
-        (value) => value !== undefined && value !== '',
-    ).length;
-    if (configuredValues === 0) return undefined;
-    if (configuredValues !== 3) {
-        throw new TypeError(
-            'FINDER_GITHUB_APP_ID, FINDER_GITHUB_APP_PRIVATE_KEY, and FINDER_GITHUB_APP_INSTALLATION_ID must be configured together',
-        );
-    }
-    return new GitHubAppTokenProvider({
-        appId: appId!,
-        privateKey: privateKey!,
-        installationId: installationId!,
-        initialToken: process.env.GITHUB_TOKEN?.trim() || undefined,
-        ...(process.env.GITHUB_API_URL
-            ? { apiUrl: process.env.GITHUB_API_URL }
-            : {}),
-    });
 }
 
 export function formatCliFailure(failure: ScrapeUniversityFailure): string {
