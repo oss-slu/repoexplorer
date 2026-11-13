@@ -1,0 +1,44 @@
+name: Build, Attest & Publish (SLSA Level 3)
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+    paths:
+      - 'app/**'
+      - 'api/**'
+      - 'docs/**'
+      - '*.Dockerfile'
+      - 'nginx.conf'
+      - '.github/workflows/build-attest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build-app:
+    name: App SLSA L3 Build & Attestation
+    uses: oss-slu/oss_cicd_automation/.github/workflows/slsa-build-attest.yml@main
+    with:
+      image-name: ghcr.io/oss-slu/repoexplorer/app
+      context: .
+      file: app.Dockerfile
+      sbom-artifact-name: repoexplorer-app-sbom
+      push: true
+    secrets: inherit
+
+  build-api:
+    name: API SLSA L3 Build & Attestation
+    uses: oss-slu/oss_cicd_automation/.github/workflows/slsa-build-attest.yml@main
+    with:
+      image-name: ghcr.io/oss-slu/repoexplorer/api
+      context: .
+      file: api.Dockerfile
+      sbom-artifact-name: repoexplorer-api-sbom
+      push: true
+    secrets: inherit
