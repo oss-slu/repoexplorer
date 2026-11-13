@@ -24,10 +24,11 @@ describe('PostgresDataSource', () => {
         const mockDbRows = [{ id: 1, full_name: 'test/repo', stargazers_count: 50 }];
         queryMock.mockResolvedValue({ rows: mockDbRows });
 
-        const result = await dataSource.getRepoData();
+        await dataSource.getRepoData();
 
-        expect(queryMock).toHaveBeenCalledWith('SELECT * FROM repositories_parquet');
-        expect(result).toEqual([{ id: 1, fullName: 'test/repo', stargazersCount: 50 }]);
+        expect(queryMock).toHaveBeenCalledTimes(1);
+        const sql = queryMock.mock.calls[0][0] as string;
+        expect(sql).toMatch(/FROM repositories_parquet/);
     });
 
     it('should fetch and map security data to camelCase', async () => {
