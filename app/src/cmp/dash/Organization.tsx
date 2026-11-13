@@ -84,17 +84,24 @@ export default function Organization({ filters }: OrganizationProps) {
                 endpoint="organization/orgsPerUniversity"
                 horizontal
                 filters={filters}
+                xLabel="Organizations"
+                yLabel="University"
             />
             <BarChartDiv
                 title="Organizations Created Per Year"
                 endpoint="organization/orgsCreatedPerYear"
                 filters={filters}
+                xLabel="Year"
+                yLabel="Organizations"
             />
             <BarChartDiv
                 title="Profile Completeness"
                 endpoint="organization/profileCompleteness"
                 horizontal
                 filters={filters}
+                xLabel="Percent of Organizations"
+                yLabel="Field"
+                valueSuffix="%"
             />
         </div>
     );

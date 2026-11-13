@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type {
+    EnrichmentApi,
     ScrapingConfiguration,
     SearchQueries,
     UniversityConfiguration,
@@ -66,7 +67,17 @@ export function validateScrapingConfiguration(
             1,
             500,
         ),
+        ...(value.enrichmentApi === undefined
+            ? {}
+            : { enrichmentApi: readEnrichmentApi(value.enrichmentApi) }),
     };
+}
+
+function readEnrichmentApi(value: unknown): EnrichmentApi {
+    if (value !== 'graphql' && value !== 'rest') {
+        throw new TypeError("enrichmentApi must be 'graphql' or 'rest'");
+    }
+    return value;
 }
 
 function validateUniversity(
@@ -138,6 +149,9 @@ function readBoundedInteger(
 function requireNonEmptyString(value: unknown, name: string): string {
     if (typeof value !== 'string' || value.trim() === '') {
         throw new TypeError(`${name} must be a non-empty string`);
+    }
+    if (value.includes('\u0000')) {
+        throw new TypeError(`${name} must not contain an actual NUL byte`);
     }
     return value.trim();
 }

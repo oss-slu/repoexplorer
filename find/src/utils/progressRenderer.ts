@@ -22,6 +22,8 @@ type PhaseProgress = {
     university: string;
     completed?: number;
     total?: number;
+    skipped?: number;
+    warnings?: number;
     label?: string;
 };
 
@@ -34,7 +36,7 @@ export class CliProgressRenderer {
     private elapsedMs = 0;
     private activeRequests = 0;
     private queuedRequests = 0;
-    private waits: Partial<Record<'core' | 'search', number>> = {};
+    private waits: Partial<Record<'core' | 'search' | 'graphql', number>> = {};
     private timer: ReturnType<typeof setInterval> | undefined;
     private startedAt: number | undefined;
     private lastRender = Number.NEGATIVE_INFINITY;
@@ -73,7 +75,12 @@ export class CliProgressRenderer {
     private update(event: ScrapingProgressEvent): void {
         if (this.closed) return;
         this.elapsedMs = event.elapsedMs;
-        if (event.type === 'phase') {
+        if (event.type === 'search-retry') {
+            this.clearForOutput();
+            this.options.stdout.write(
+                `${sanitize(event.university ?? 'GitHub')}: retrying ${event.searchKind} search after ${sanitize(event.reason)} (attempt ${event.attempt}/${event.totalAttempts})\n`,
+            );
+        } else if (event.type === 'phase') {
             this.current = {
                 phase: event.phase,
                 university: event.university,
@@ -89,16 +96,23 @@ export class CliProgressRenderer {
                 university: event.university,
                 completed: event.completed,
                 total: event.total,
+                skipped: event.skipped,
+                warnings: event.warnings,
                 label: event.label,
             };
         } else if (event.type === 'request-queue') {
             this.activeRequests = event.activeRequests;
             this.queuedRequests = event.queuedRequests;
             this.waits = event.waits;
-        } else {
+        } else if (event.type === 'rate-limit-wait') {
             const until = event.until;
             if (event.bucket === 'all') {
-                this.waits = { ...this.waits, core: until, search: until };
+                this.waits = {
+                    ...this.waits,
+                    core: until,
+                    search: until,
+                    graphql: until,
+                };
             } else {
                 this.waits = { ...this.waits, [event.bucket]: until };
             }
@@ -110,6 +124,10 @@ export class CliProgressRenderer {
                     );
                 }
             }
+        } else if (event.type === 'warning' && !this.options.stdout.isTTY) {
+            this.options.stdout.write(
+                `${sanitize(event.university)}: ${sanitize(event.repository)} field ${sanitize(event.field)}; replaced ${event.replacementCount} NUL character${event.replacementCount === 1 ? '' : 's'}\n`,
+            );
         }
         this.renderIfDue();
     }
@@ -135,11 +153,20 @@ export class CliProgressRenderer {
         const label = this.current.label
             ? ` (${sanitize(this.current.label)})`
             : '';
+        const recovery = [
+            this.current.skipped ? `${this.current.skipped} skipped` : undefined,
+            this.current.warnings
+                ? `${this.current.warnings} text warnings`
+                : undefined,
+        ]
+            .filter((part): part is string => part !== undefined)
+            .join(', ');
+        const recoveryText = recovery ? ` | ${recovery}` : '';
         const queue =
             this.activeRequests || this.queuedRequests
                 ? ` | ${this.activeRequests} active${this.queuedRequests ? `, ${this.queuedRequests} queued` : ''}`
                 : '';
-        const waitLabels = (['search', 'core'] as const)
+        const waitLabels = (['search', 'core', 'graphql'] as const)
             .filter((bucket) => (this.waits[bucket] ?? 0) > this.now())
             .map(
                 (bucket) =>
@@ -150,7 +177,7 @@ export class CliProgressRenderer {
             this.elapsedMs,
             this.startedAt === undefined ? 0 : this.now() - this.startedAt,
         );
-        const line = `${sanitize(this.current.university)} | ${this.current.phase}${progress}${label}${queue}${waits} | elapsed ${formatDuration(elapsed)}`;
+        const line = `${sanitize(this.current.university)} | ${this.current.phase}${progress}${label}${recoveryText}${queue}${waits} | elapsed ${formatDuration(elapsed)}`;
         const width = this.options.stdout.columns;
         const visible = width && width > 0 ? truncate(line, width) : line;
         this.options.stdout.write(`\r\u001b[2K${visible}`);

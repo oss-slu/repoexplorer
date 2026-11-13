@@ -3,6 +3,15 @@ export type ScrapingPhase =
 
 export type ScrapingProgressEvent =
     | {
+          type: 'search-retry';
+          searchKind: 'repository' | 'organization' | 'user';
+          reason: string;
+          attempt: number;
+          totalAttempts: number;
+          university?: string;
+          elapsedMs: number;
+      }
+    | {
           type: 'phase';
           phase: ScrapingPhase;
           university: string;
@@ -14,19 +23,30 @@ export type ScrapingProgressEvent =
           university: string;
           completed: number;
           total: number;
+          skipped?: number;
+          warnings?: number;
           label?: string;
+          elapsedMs: number;
+      }
+    | {
+          type: 'warning';
+          university: string;
+          repository: string;
+          field: string;
+          replacementCount: number;
+          code: 'nul_replaced';
           elapsedMs: number;
       }
     | {
           type: 'request-queue';
           activeRequests: number;
           queuedRequests: number;
-          waits: Partial<Record<'core' | 'search', number>>;
+          waits: Partial<Record<'core' | 'search' | 'graphql', number>>;
           elapsedMs: number;
       }
     | {
           type: 'rate-limit-wait';
-          bucket: 'core' | 'search' | 'all';
+          bucket: 'core' | 'search' | 'graphql' | 'all';
           until: number;
           reason: 'primary' | 'secondary';
           elapsedMs: number;
