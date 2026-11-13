@@ -3,6 +3,8 @@ import type { QueryResultRow, QueryResult } from 'pg';
 
 // ** pg reads the PG variables from process.env automatically
 
+pg.types.setTypeParser(20, (val) => parseInt(val, 10));
+
 export const pool = new pg.Pool({
     max: 10,
     idleTimeoutMillis: 30_000,

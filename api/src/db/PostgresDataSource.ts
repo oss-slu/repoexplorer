@@ -9,7 +9,18 @@ function toCamelCase(str: string): string {
 function mapRowToCamelCase<T>(row: any): T {
     const newObj: any = {};
     for (const key in row) {
-        newObj[toCamelCase(key)] = row[key];
+        const camelKey = toCamelCase(key);
+        let value = row[key];
+        
+        if (typeof value === 'string' && /^-?\d+$/.test(value)) {
+            const parsedNum = Number(value);
+
+            if (Number.isSafeInteger(parsedNum)) {
+                value = parsedNum;
+            }
+        }
+
+        newObj[camelKey] = value;
     }
     return newObj as T;
 }
