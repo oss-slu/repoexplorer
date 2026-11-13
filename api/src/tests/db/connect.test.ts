@@ -17,8 +17,13 @@ const PoolCtor = jest.fn<(config?: unknown) => typeof poolInstance>(
     () => poolInstance,
 );
 
+const setTypeParser = jest.fn();
+
 jest.unstable_mockModule('pg', () => ({
-    default: { Pool: PoolCtor },
+    default: {
+        Pool: PoolCtor,
+        types: { setTypeParser },
+    },
 }));
 
 const { pool, query, connectDB, closeDB } = await import('../../db/connect');
