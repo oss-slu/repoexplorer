@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { BASE_SUSTAINABILITY, FILTERABLE_REPO_FIELDS } from '../consts';
 import type { repoData } from '../types/appData';
 import type { respSustainability } from '../types/routes';
-import sampleData from '../../data/sample/sampleRepoData.json';
+import type { AppDataSource } from '../types/AppDataSource';
 import {
     getAvailableAvg,
     makeBusFactorDistributionArray,
@@ -12,9 +12,6 @@ import {
     makeSustainabilityIndicatorsArray,
 } from '../utils/math';
 import { filterData } from '../utils/filter';
-
-const data = sampleData as repoData[];
-const router = Router();
 
 const SUB_ENDPOINTS = {
     avgContributors: (rows: repoData[]) => getAvailableAvg(rows, 'contributorCount'),
@@ -34,17 +31,34 @@ function makeResponse(rows: repoData[]): respSustainability {
     ) as respSustainability;
 }
 
-router.get(BASE_SUSTAINABILITY, (req, res) => {
-    const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
-    res.json(makeResponse(filtered));
-});
 
-for (const endpoint of endpoints) {
-    router.get(`${BASE_SUSTAINABILITY}/${endpoint}`, (req, res) => {
-        const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
-        const value = SUB_ENDPOINTS[endpoint](filtered);
-        res.json({ [endpoint]: value });
+export function createSustainabilityRouter(dataSource: AppDataSource) {
+    const router = Router();
+
+    // Register primary GET response
+    router.get(BASE_SUSTAINABILITY, async (req, res, next) => {
+        try {
+            const data = await dataSource.getRepoData();
+            const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
+            res.json(makeResponse(filtered));
+        } catch (error) {
+            next(error);
+        }
     });
-}
 
-export default router;
+    // Register sub GET responses
+    for (const endpoint of endpoints) {
+        router.get(`${BASE_SUSTAINABILITY}/${endpoint}`, async (req, res, next) => {
+            try {
+                const data = await dataSource.getRepoData();
+                const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
+                const value = SUB_ENDPOINTS[endpoint](filtered);
+                res.json({ [endpoint]: value });
+            } catch (error) {
+                next(error);
+            }
+        });
+    }
+
+    return router;
+}

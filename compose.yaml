@@ -11,6 +11,8 @@ services:
             PGDATABASE: ${PGDATABASE:?Set PGDATABASE in .env}
             PGUSER: ${PGUSER:?Set PGUSER in .env}
             PGPASSWORD: ${PGPASSWORD:?Set PGPASSWORD in .env}
+        env_file:
+            - .env
         ports:
             - '127.0.0.1:${PGPORT:-5433}:5432'
         volumes:
@@ -31,11 +33,15 @@ services:
             dockerfile: api.Dockerfile
         restart: unless-stopped
         environment:
+            DATA_SOURCE: ${DATA_SOURCE:-json}
             PGHOST: db
-            PGPORT: 5432
+            PGPORT: ${PGPORT:?Set PGPORT in .env}
             PGDATABASE: ${PGDATABASE:?Set PGDATABASE in .env}
             PGUSER: ${PGUSER:?Set PGUSER in .env}
             PGPASSWORD: ${PGPASSWORD:?Set PGPASSWORD in .env}
+            NODE_OPTIONS: --max-old-space-size=4096
+        env_file:
+            - .env
         depends_on:
             db:
                 condition: service_healthy
