@@ -25,10 +25,14 @@ function mapRowToCamelCase<T>(row: any): T {
     return newObj as T;
 }
 
+const REPOS_LIMIT = 10_000;
+
 export class PostgresDataSource implements AppDataSource {
-    
     async getRepoData(): Promise<repoData[]> {
-        const result = await query<any>('SELECT * FROM repositories_parquet');
+        const result = await query<any>(`
+            SELECT * FROM repositories_parquet where owner in ('oss-slu', 'UC_OSPO_Network') union all
+            SELECT * FROM repositories_parquet limit ${REPOS_LIMIT}
+        `);
         return result.rows.map((row) => mapRowToCamelCase<repoData>(row));
     }
 

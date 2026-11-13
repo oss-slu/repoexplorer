@@ -2,21 +2,22 @@ import express from 'express';
 import cors from 'cors';
 import health from './routes/health';
 import { createOverviewRouter } from './routes/overview';
-import { JsonDataSource } from './db/JsonDataSource';
 import type { AppDataSource } from './types/AppDataSource';
 import { createImpactRouter } from './routes/impact';
 import { createSecurityRouter } from './routes/security';
 import { createSustainabilityRouter } from './routes/sustainability';
 import { createOrganizationRouter } from './routes/organization';
+import { PostgresDataSource } from './db/PostgresDataSource';
+import { JsonDataSource } from './db/JsonDataSource';
 
 export const ROUTES = [
     { router: health, route: '/health' },
 ];
 
-
 export function createApp(
     origin?: string,
-    dataSource: AppDataSource = new JsonDataSource(),
+    dataSource: AppDataSource = process.env.DATA_SOURCE === 'postgres'
+        ? new PostgresDataSource() : new JsonDataSource(), 
 ) {
     const app = express();
 
