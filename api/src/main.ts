@@ -3,7 +3,7 @@ import { createApp } from './app';
 import { PORT, VITE_ORIGIN } from './consts';
 import { connectDB, closeDB } from './db/connect';
 import { JsonDataSource } from './db/JsonDataSource';
-import { PostgresDataSource } from './db/PostgresDataSource';
+import { PostgresDataSource } from './db/dataSource';
 import type { AppDataSource } from './types/AppDataSource';
 import { MMDDYY_HHMMSS } from './utils/datetime';
 

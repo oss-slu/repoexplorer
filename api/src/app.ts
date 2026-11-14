@@ -7,8 +7,7 @@ import { createImpactRouter } from './routes/impact';
 import { createSecurityRouter } from './routes/security';
 import { createSustainabilityRouter } from './routes/sustainability';
 import { createOrganizationRouter } from './routes/organization';
-import { PostgresDataSource } from './db/PostgresDataSource';
-import { JsonDataSource } from './db/JsonDataSource';
+import { PostgresDataSource, JsonDataSource } from './db/dataSource';
 
 export const ROUTES = [
     { router: health, route: '/health' },

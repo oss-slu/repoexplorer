@@ -1,4 +1,7 @@
 import { jest } from '@jest/globals';
+import sampleRepoData from '../../../data/sample/sampleRepoData.json';
+import sampleSecrData from '../../../data/sample/sampleSecrData.json';
+import sampleOrgsData from '../../../data/sample/sampleOrgsData.json';
 
 jest.unstable_mockModule('../../db/connect', () => ({
     query: jest.fn(),
@@ -9,7 +12,10 @@ describe('PostgresDataSource', () => {
     let queryMock: any;
 
     beforeAll(async () => {
-        const { PostgresDataSource } = await import('../../db/PostgresDataSource');
+
+        jest.resetModules();
+
+        const { PostgresDataSource } = await import('../../db/dataSource');
         const connect = await import('../../db/connect');
         
         dataSource = new PostgresDataSource();
@@ -49,5 +55,29 @@ describe('PostgresDataSource', () => {
 
         expect(queryMock).toHaveBeenCalledWith('SELECT * FROM organizations_parquet');
         expect(result).toEqual([{ login: 'test-org', createdAt: '2026-01-01' }]);
+    });
+});
+
+describe('JsonDataSource', () => {
+    let dataSource: any;
+
+    beforeAll(async () => {
+        const { JsonDataSource } = await import('../../db/dataSource');
+        dataSource = new JsonDataSource();
+    });
+
+    it('should return repository data from the sample JSON file', async () => {
+        const result = await dataSource.getRepoData();
+        expect(result).toEqual(sampleRepoData);
+    });
+
+    it('should return security data from the sample JSON file', async () => {
+        const result = await dataSource.getSecrData();
+        expect(result).toEqual(sampleSecrData);
+    });
+
+    it('should return organization data from the sample JSON file', async () => {
+        const result = await dataSource.getOrgsData();
+        expect(result).toEqual(sampleOrgsData);
     });
 });
