@@ -26,6 +26,7 @@ jobs:
     uses: oss-slu/oss_cicd_automation/.github/workflows/slsa-build-attest.yml@main
     with:
       image-name: ghcr.io/oss-slu/repoexplorer/app
+      harbor-image: registry.oss-slu.online/repoexplorer/app
       context: .
       file: app.Dockerfile
       sbom-artifact-name: repoexplorer-app-sbom
@@ -37,6 +38,7 @@ jobs:
     uses: oss-slu/oss_cicd_automation/.github/workflows/slsa-build-attest.yml@main
     with:
       image-name: ghcr.io/oss-slu/repoexplorer/api
+      harbor-image: registry.oss-slu.online/repoexplorer/api
       context: .
       file: api.Dockerfile
       sbom-artifact-name: repoexplorer-api-sbom
