@@ -192,7 +192,7 @@ export default function PieChartDiv({
             }
         };
 
-        fetchData();
+        void fetchData();
 
         return () => controller.abort();
     }, [endpoint, queryParams, title]);
