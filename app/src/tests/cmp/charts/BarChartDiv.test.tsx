@@ -70,7 +70,11 @@ describe('BarChartDiv', () => {
             ).toBeInTheDocument();
         });
 
-        expect(await screen.findByText('96.4%')).toBeInTheDocument();
+        expect(
+            await screen.findByText('96.4%', {
+                ignore: 'script, style, #recharts_measurement_span',
+            }),
+        ).toBeInTheDocument();
         expect(await screen.findByText('Feature')).toBeInTheDocument();
     });
 
@@ -156,5 +160,65 @@ describe('BarChartDiv', () => {
                 signal: expect.any(AbortSignal),
             }),
         );
+    });
+
+    it('sorts bars from smallest to largest', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(() =>
+                Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve([
+                            { name: 'beta', value: 50 },
+                            { name: 'alpha', value: 10 },
+                            { name: 'gamma', value: 30 },
+                        ]),
+                }),
+            ) as unknown as typeof fetch,
+        );
+
+        const { container } = render(
+            <BarChartDiv title="Sorted" endpoint="overview/test" />,
+        );
+
+        await screen.findByText('10.0');
+
+        const values = Array.from(container.querySelectorAll('text'))
+            .map((el) => el.textContent ?? '')
+            .filter((t) => /^\d+\.0$/.test(t));
+
+        expect(values).toEqual(['10.0', '30.0', '50.0']);
+    });
+
+    it('renders legend labels in black', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(() =>
+                Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve([
+                            { name: 'Python', DEV: 0.6, EDU: 0.4 },
+                            { name: 'JavaScript', DEV: 0.8, EDU: 0.2 },
+                        ]),
+                }),
+            ) as unknown as typeof fetch,
+        );
+
+        const { container } = render(
+            <BarChartDiv title="Stacked" endpoint="overview/test" stacked />,
+        );
+
+        await screen.findByText('Stacked');
+
+        const labels = container.querySelectorAll(
+            '.recharts-legend-item-text span',
+        );
+
+        expect(labels.length).toBeGreaterThan(0);
+        labels.forEach((label) => {
+            expect(label).toHaveStyle({ color: 'rgb(0, 0, 0)' });
+        });
     });
 });

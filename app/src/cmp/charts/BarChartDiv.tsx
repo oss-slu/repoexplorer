@@ -110,6 +110,15 @@ export default function BarChartDiv({
     const formatValue = (v: unknown) =>
         typeof v === 'number' ? `${v.toFixed(1)}${valueSuffix}` : String(v);
 
+    const barTotal = (d: barDatum) =>
+        keys.reduce(
+            (sum, key) =>
+                sum + (Number((d as Record<string, unknown>)[key]) || 0),
+            0,
+        );
+
+    const sortedData = [...data].sort((a, b) => barTotal(a) - barTotal(b));
+
     return (
         <div
             style={{
@@ -126,7 +135,7 @@ export default function BarChartDiv({
             <h2>{title}</h2>
             <ResponsiveContainer width="100%" height={460}>
                 <BarChart
-                    data={data}
+                    data={sortedData}
                     layout={horizontal ? 'vertical' : 'horizontal'}
                     margin={{
                         top: 20,
@@ -223,7 +232,17 @@ export default function BarChartDiv({
                         formatter={formatValue}
                     />
                     {keys.length > 1 && (
-                        <Legend wrapperStyle={{ paddingTop: 20 }} />
+                        <Legend
+                            layout="vertical"
+                            verticalAlign="top"
+                            align="left"
+                            wrapperStyle={{ paddingLeft: 60 }}
+                            formatter={(value) => (
+                                <span style={{ color: '#000000' }}>
+                                    {value}
+                                </span>
+                            )}
+                        />
                     )}
                     {keys.map((key, i) => (
                         <Bar
@@ -235,7 +254,7 @@ export default function BarChartDiv({
                             isAnimationActive={false}
                         >
                             {!stacked &&
-                                data.map((_, j) => (
+                                sortedData.map((_, j) => (
                                     <Cell
                                         key={j}
                                         fill={PIE_COLORS[j % PIE_COLORS.length]}
