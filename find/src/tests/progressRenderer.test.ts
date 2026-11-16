@@ -92,3 +92,23 @@ test('uses sparse phase and significant wait messages when stdout is redirected'
     expect(sink.chunks).toHaveLength(2);
     now += 1;
 });
+
+test('prints concise structured search retry progress to redirected output', () => {
+    const sink = output(false);
+    const renderer = new CliProgressRenderer({ stdout: sink.stream });
+    renderer.start();
+    renderer.onProgress({
+        type: 'search-retry',
+        searchKind: 'organization',
+        reason: 'incomplete-results',
+        attempt: 2,
+        totalAttempts: 3,
+        university: 'SLU',
+        elapsedMs: 1_500,
+    });
+    renderer.finish();
+    expect(sink.chunks.join('')).toContain(
+        'SLU: retrying organization search after incomplete-results (attempt 2/3)',
+    );
+    expect(sink.chunks.join('')).not.toContain('\u001b');
+});

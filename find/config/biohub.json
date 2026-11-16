@@ -1,0 +1,11 @@
+{
+    "repositoryConcurrency": 8,
+    "databaseBatchSize": 100,
+    "universities": [
+        {
+            "fullName": "Biohub",
+            "key": "Biohub",
+            "acronym": "Biohub"
+        }
+    ]
+}

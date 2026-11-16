@@ -8,6 +8,7 @@ export type RequestHandler = (
 export function createTestClient(
     handler: RequestHandler,
     maxRetries = 0,
+    concurrency?: number,
 ): GitHubRequestClient {
     return new GitHubRequestClient({
         fetch: (async (input, init) => {
@@ -15,6 +16,7 @@ export function createTestClient(
             return handler(url, init ?? {});
         }) as typeof fetch,
         maxRetries,
+        ...(concurrency === undefined ? {} : { concurrency }),
         retryBaseDelayMs: 0,
         retryMaxDelayMs: 0,
         sleep: async () => {},

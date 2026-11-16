@@ -1,0 +1,11 @@
+{
+    "repositoryConcurrency": 10,
+    "databaseBatchSize": 100,
+    "universities": [
+        {
+            "key": "SnT - Université du Luxembourg",
+            "fullName": "SnT - Université du Luxembourg",
+            "acronym": "SnT"
+        }
+    ]
+}
