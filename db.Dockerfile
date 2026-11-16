@@ -5,3 +5,4 @@ COPY scripts/db/schema.sql /docker-entrypoint-initdb.d/020-schema.sql
 COPY scripts/db/repository-scraping.sql /docker-entrypoint-initdb.d/repository-scraping.sql
 COPY scripts/db/repository-scraping-table.sql /docker-entrypoint-initdb.d/repository-scraping-table.sql
 COPY scripts/db/schema_parquet.sql /docker-entrypoint-initdb.d/schema_parquet.sql
+COPY scripts/db/repository-scraping-checkpoints.sql /docker-entrypoint-initdb.d/repository-scraping-checkpoints.sql

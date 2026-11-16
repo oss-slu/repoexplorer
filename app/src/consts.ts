@@ -1,4 +1,4 @@
-export const API_URL = '/api';
+export const API_URL = import.meta.env.VITE_API_URL || '/repoexplorer/api';
 
 export const PIE_COLORS = [
     '#6366f1',
