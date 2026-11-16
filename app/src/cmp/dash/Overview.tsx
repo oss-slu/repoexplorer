@@ -3,6 +3,7 @@ import { API_URL, MAX_VISIBLE_ROWS } from '../../consts';
 import type { overviewSummary } from '../../types/dash';
 import BarChartDiv from '../charts/BarChartDiv';
 import DataBlock from '../charts/DataBlock';
+import DataBlockIcon from '../charts/DataBlockIcon';
 import DataTable from '../charts/DataTable';
 import PieChartDiv from '../charts/PieChartDiv';
 
@@ -89,18 +90,22 @@ export default function Overview({ filters }: OverviewProps) {
                     <DataBlock
                         header="Total repositories"
                         value={summary.totalRepos ?? 0}
+                        icon={<DataBlockIcon name="repository" />}
                     />
                     <DataBlock
                         header="Total contributors"
                         value={summary.totalContributors ?? 0}
+                        icon={<DataBlockIcon name="contributors" />}
                     />
                     <DataBlock
                         header="Repositories with a license"
                         value={`${(summary.percentWithLicense ?? 0).toFixed(1)}%`}
+                        icon={<DataBlockIcon name="license" />}
                     />
                     <DataBlock
                         header="Average bus factor"
                         value={(summary.avgBusFactor ?? 0).toFixed(1)}
+                        icon={<DataBlockIcon name="bus-factor" />}
                     />
                 </div>
             </div>

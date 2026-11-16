@@ -3,6 +3,7 @@ import { API_URL, MAX_VISIBLE_ROWS } from '../../consts';
 import { formatLabel } from '../../utils/formatLabel';
 import BarChartDiv from '../charts/BarChartDiv';
 import DataBlock from '../charts/DataBlock';
+import DataBlockIcon from '../charts/DataBlockIcon';
 import DataTable from '../charts/DataTable';
 
 type communityFilesByStarsDatum = {
@@ -120,10 +121,12 @@ export default function Sustainability({ filters }: SustainabilityProps) {
                     <DataBlock
                         header="Average bus factor"
                         value={(summary.avgBusFactor ?? 0).toFixed(1)}
+                        icon={<DataBlockIcon name="bus-factor" />}
                     />
                     <DataBlock
                         header="Average # contributors"
                         value={(summary.avgContributors ?? 0).toFixed(1)}
+                        icon={<DataBlockIcon name="contributors" />}
                     />
                 </div>
             </div>
