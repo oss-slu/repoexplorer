@@ -2,14 +2,15 @@ import { jest } from '@jest/globals';
 import sampleRepoData from '../../../data/sample/sampleRepoData.json';
 import sampleSecrData from '../../../data/sample/sampleSecrData.json';
 import sampleOrgsData from '../../../data/sample/sampleOrgsData.json';
+import type { AppDataSource } from '../../types/AppDataSource';
 
 jest.unstable_mockModule('../../db/connect', () => ({
     query: jest.fn(),
 }));
 
 describe('PostgresDataSource', () => {
-    let dataSource: any;
-    let queryMock: any;
+    let dataSource: AppDataSource;
+    let queryMock: ReturnType<typeof jest.fn>;
 
     beforeAll(async () => {
 
@@ -19,7 +20,7 @@ describe('PostgresDataSource', () => {
         const connect = await import('../../db/connect');
         
         dataSource = new PostgresDataSource();
-        queryMock = connect.query;
+        queryMock = connect.query as unknown as ReturnType<typeof jest.fn>;
     });
 
     beforeEach(() => {
@@ -59,7 +60,7 @@ describe('PostgresDataSource', () => {
 });
 
 describe('JsonDataSource', () => {
-    let dataSource: any;
+    let dataSource: AppDataSource;
 
     beforeAll(async () => {
         const { JsonDataSource } = await import('../../db/dataSource');
