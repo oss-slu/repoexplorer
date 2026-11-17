@@ -7,10 +7,10 @@ export default defineConfig({
     server: {
         port: 6284,
         proxy: {
-            '/api': {
+            '/repoexplorer/api': {
                 target: 'http://localhost:8765',
                 changeOrigin: true,
-                rewrite: (path) => path.replace(/^\/api/, ''),
+                rewrite: (path) => path.replace(/^\/repoexplorer\/api/, ''),
             },
         },
     },
