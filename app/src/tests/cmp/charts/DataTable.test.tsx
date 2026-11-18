@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DataTable from '../../../cmp/charts/DataTable';
 
@@ -66,4 +66,94 @@ describe('DataTable', () => {
             await screen.findByText(/Failed to load Universities:/),
         ).toBeInTheDocument();
     });
+
+    it('loads next 500 repositories when scrolling near bottom', async () => {
+        const firstPage = Array.from({ length: 500 }, (_, index) => ({
+            fullName: `Repository ${index + 1}`,
+        }));
+        const secondPage = [{ fullName: 'Repository 501' }];
+
+        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+            const url = new URL(String(input), 'http://localhost');
+            const rows =
+                url.searchParams.get('offset') === '0' ? firstPage: secondPage;
+
+            return {
+                ok: true,
+                json: async () => rows,
+            } as Response;
+        });
+
+        globalThis.fetch = fetchMock as typeof fetch;
+
+        const originalClientHeight = Object.getOwnPropertyDescriptor(
+            HTMLElement.prototype,
+            'clientHeight',
+        );
+
+        const originalScrollHeight = Object.getOwnPropertyDescriptor(
+            HTMLElement.prototype,
+            'scrollHeight',
+        );
+
+        Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+            configurable: true,
+            value: 500,
+        });
+
+        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+            configurable: true,
+            value: 2000,
+        });
+
+        try {
+            render(
+                <DataTable
+                    title="Browse Repositories"
+                    endpoint="overview/repositories"
+                    scrollable
+                    showRowMessage={false}
+                />,
+            );
+            expect(await screen.findByText('Repository 1')).toBeInTheDocument();
+
+            const container = screen.getByRole('table').parentElement!;
+            container.scrollTop = 1600;
+            fireEvent.scroll(container);
+
+            expect(
+                await screen.findByText('Repository 501'),
+            ).toBeInTheDocument();
+
+            const requestedUrls = fetchMock.mock.calls.map(([input]) =>
+                new URL(String(input), 'http://localhost'),
+            );
+
+            expect(requestedUrls).toHaveLength(2);
+            expect(requestedUrls[0].searchParams.get('limit')).toBe('500');
+            expect(requestedUrls[0].searchParams.get('offset')).toBe('0');
+            expect(requestedUrls[1].searchParams.get('limit')).toBe('500');
+            expect(requestedUrls[1].searchParams.get('offset')).toBe('500');
+        } finally {
+            if(originalClientHeight) {
+                Object.defineProperty(
+                    HTMLElement.prototype,
+                    'clientHeight',
+                    originalClientHeight,
+                );
+            } else {
+                Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
+            }
+
+            if (originalScrollHeight) {
+                Object.defineProperty(
+                    HTMLElement.prototype,
+                    'scrollHeight',
+                    originalScrollHeight,
+                );
+            } else {
+                Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+            }
+        }
+    })
 });
