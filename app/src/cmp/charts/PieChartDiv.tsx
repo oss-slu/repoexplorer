@@ -10,20 +10,78 @@ import {
 import { API_URL, PIE_COLORS } from '../../consts';
 import type { chartProps } from '../../types/charts';
 
-const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: { cx: number; cy: number; midAngle: number; innerRadius: number; outerRadius: number; percent: number }) => {
+// Languages from the original dashboard
+const ORIGINAL_LANGUAGES = [
+    'Python',
+    'Jupyter Notebook',
+    'HTML',
+    'JavaScript',
+    'C++',
+    'Java',
+    'R',
+    'C',
+];
+
+// Additional languages requested for the chart
+const ADDITIONAL_LANGUAGES = [
+    'Go',
+    'Rust',
+    'TypeScript',
+    'CSS',
+    'Shell',
+    'Dockerfile',
+    'C#',
+];
+
+// Toggle additional languages on or off
+const INCLUDE_ADDITIONAL_LANGUAGES = true;
+
+const SELECTED_LANGUAGES = new Set(
+    [
+        ...ORIGINAL_LANGUAGES,
+        ...(INCLUDE_ADDITIONAL_LANGUAGES ? ADDITIONAL_LANGUAGES : []),
+    ].map((language) => language.toLowerCase()),
+);
+
+const renderCustomizedLabel = ({
+    cx,
+    cy,
+    midAngle,
+    innerRadius,
+    outerRadius,
+    percent,
+}: {
+    cx?: number | string;
+    cy?: number | string;
+    midAngle?: number;
+    innerRadius?: number;
+    outerRadius?: number;
+    percent?: number;
+}) => {
+    if (
+        cx === undefined ||
+        cy === undefined ||
+        midAngle === undefined ||
+        innerRadius === undefined ||
+        outerRadius === undefined ||
+        percent === undefined
+    ) {
+        return null;
+    }
+
     const RADIAN = Math.PI / 180;
     const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    const x = Number(cx) + radius * Math.cos(-midAngle * RADIAN);
+    const y = Number(cy) + radius * Math.sin(-midAngle * RADIAN);
 
     if (percent < 0.03) return null;
 
     return (
-        <text 
-            x={x} 
-            y={y} 
-            fill="black" 
-            textAnchor="middle" 
+        <text
+            x={x}
+            y={y}
+            fill="black"
+            textAnchor="middle"
             dominantBaseline="central"
             fontSize={12}
             fontWeight={600}
@@ -153,28 +211,65 @@ export default function PieChartDiv({
 
                 normalizedArr.sort((a, b) => b.value - a.value);
 
-                const MAX_SLICES = 8;
+                const isLanguageDistribution =
+                    endpoint === 'overview/languageDistribution';
+
                 let top = normalizedArr;
 
-                if (normalizedArr.length > MAX_SLICES) {
-                    top = normalizedArr.slice(0, MAX_SLICES);
-                    const rest = normalizedArr.slice(MAX_SLICES);
-                    
+                if (isLanguageDistribution) {
+                    const selected = normalizedArr.filter((item) =>
+                        SELECTED_LANGUAGES.has(item.name.toLowerCase()),
+                    );
+
+                    const rest = normalizedArr.filter(
+                        (item) => !SELECTED_LANGUAGES.has(item.name.toLowerCase()),
+                    );
+
                     otherValue += rest.reduce((sum, item) => sum + item.value, 0);
-                    
+
                     for (const item of rest) {
                         if (item.count !== undefined) {
                             otherCount += item.count;
                             hasOtherCount = true;
                         }
                     }
+
+                    top = selected;
+                } else {
+                    const MAX_SLICES = 8;
+
+                    if (normalizedArr.length > MAX_SLICES) {
+                        top = normalizedArr.slice(0, MAX_SLICES);
+                        const rest = normalizedArr.slice(MAX_SLICES);
+
+                        otherValue += rest.reduce(
+                            (sum, item) => sum + item.value,
+                            0,
+                        );
+
+                        for (const item of rest) {
+                            if (item.count !== undefined) {
+                                otherCount += item.count;
+                                hasOtherCount = true;
+                            }
+                        }
+                    }
                 }
 
                 if (otherValue > 0) {
-                    const otherObj: any = { name: 'Other', value: otherValue };
+                    const otherObj: {
+                        name: string;
+                        value: number;
+                        count?: number;
+                    } = {
+                        name: 'Other',
+                        value: otherValue,
+                    };
+
                     if (hasOtherCount) {
                         otherObj.count = otherCount;
                     }
+
                     top.push(otherObj);
                 }
 
