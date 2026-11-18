@@ -8,7 +8,11 @@ vi.mock('recharts', async () => {
         ...OriginalModule,
         ResponsiveContainer: ({ children }: any) => <div>{children}</div>,
         PieChart: ({ children }: any) => <div>{children}</div>,
-        Pie: () => null,
+        Pie: ({ data }: any) => (
+            <div data-testid="pie-data">
+                {JSON.stringify(data)}
+            </div>
+        ),
         Tooltip: () => null,
         Legend: (props: any) => (
             <div>{typeof props.content === 'function' ? props.content() : null}</div>
@@ -67,6 +71,90 @@ describe('PieChartDiv', () => {
         const legend = await screen.findByRole('list');
         expect(within(legend).getByText('TypeScript')).toBeInTheDocument();
         expect(within(legend).getByText('Other')).toBeInTheDocument();
+    });
+
+    it('groups unselected languages into Other', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(() =>
+                Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve({
+                            languageDistribution: [
+                                { name: 'Python', value: 0.4 },
+                                { name: 'TypeScript', value: 0.2 },
+                                { name: 'Ruby', value: 0.15 },
+                                { name: 'Kotlin', value: 0.1 },
+                                { name: 'Unknown', value: 0.15 },
+                            ],
+                        }),
+                }),
+            ) as unknown as typeof fetch,
+        );
+
+        render(
+            <PieChartDiv
+                title="Language Distribution"
+                endpoint="overview/languageDistribution"
+            />,
+        );
+
+        const legend = await screen.findByRole('list');
+
+        expect(within(legend).getByText('Python')).toBeInTheDocument();
+        expect(within(legend).getByText('TypeScript')).toBeInTheDocument();
+        expect(within(legend).getByText('Other')).toBeInTheDocument();
+
+        expect(within(legend).queryByText('Ruby')).not.toBeInTheDocument();
+        expect(within(legend).queryByText('Kotlin')).not.toBeInTheDocument();
+        const pieData = JSON.parse(screen.getByTestId('pie-data').textContent || '[]');
+
+        expect(pieData.find((item: { name: string }) => item.name === 'Other').value)
+            .toBeCloseTo(0.4);
+    });
+
+    it('keeps the top eight categories for other pie charts', async () => {
+        const licenses = Array.from({ length: 10 }, (_, i) => ({
+            name: `License ${i + 1}`,
+            value: 10 - i,
+        }));
+
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(() =>
+                Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve({
+                            licenseDistribution: licenses,
+                        }),
+                }),
+            ) as unknown as typeof fetch,
+        );
+
+        render(
+            <PieChartDiv
+                title="License Distribution"
+                endpoint="overview/licenseDistribution"
+            />,
+        );
+
+        const legend = await screen.findByRole('list');
+
+        expect(within(legend).getByText('License 1')).toBeInTheDocument();
+        expect(within(legend).getByText('License 8')).toBeInTheDocument();
+        expect(within(legend).getByText('Other')).toBeInTheDocument();
+
+        expect(within(legend).queryByText('License 9')).not.toBeInTheDocument();
+        expect(within(legend).queryByText('License 10')).not.toBeInTheDocument();
+
+        const pieData = JSON.parse(
+            screen.getByTestId('pie-data').textContent || '[]',
+        );
+
+        expect(pieData.find((item: { name: string }) => item.name === 'Other').value)
+            .toBe(3);
     });
 
     it('shows an error message when the response is not ok', async () => {
