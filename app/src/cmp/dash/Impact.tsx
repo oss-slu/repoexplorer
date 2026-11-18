@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { API_URL, MAX_VISIBLE_ROWS } from '../../consts';
 import BarChartDiv from '../charts/BarChartDiv';
 import DataBlock from '../charts/DataBlock';
+import DataBlockIcon from '../charts/DataBlockIcon';
 import DataTable from '../charts/DataTable';
 
 type impactSummary = {
@@ -97,18 +98,22 @@ export default function Impact({ filters }: ImpactProps) {
                     <DataBlock
                         header="Total stars"
                         value={summary.totalStars ?? 0}
+                        icon={<DataBlockIcon name="stars" />}
                     />
                     <DataBlock
                         header="Total forks"
                         value={summary.totalForks ?? 0}
+                        icon={<DataBlockIcon name="forks" />}
                     />
                     <DataBlock
                         header="Total downloads"
                         value={summary.totalDownloads ?? 0}
+                        icon={<DataBlockIcon name="downloads" />}
                     />
                     <DataBlock
                         header="Total contributors"
                         value={summary.totalContributors ?? 0}
+                        icon={<DataBlockIcon name="contributors" />}
                     />
                 </div>
             </div>

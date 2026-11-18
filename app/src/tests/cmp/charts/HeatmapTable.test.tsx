@@ -23,7 +23,7 @@ describe('HeatmapTable', () => {
         ).toBeInTheDocument();
     });
 
-    it('renders a simple heatmap once data loads', async () => {
+    it('renders a simple heatmap, axis labels, and ticks once data loads', async () => {
         vi.stubGlobal(
             'fetch',
             vi.fn(() =>
@@ -40,18 +40,31 @@ describe('HeatmapTable', () => {
             ) as unknown as typeof fetch,
         );
 
-        render(
+        const { container } = render(
             <HeatmapTable
                 title="Average score per Security Metric"
                 endpoint="security/avgScorePerMetric"
             />,
         );
 
-        await waitFor(() => {
-            expect(
-                screen.getByText('Average score per Security Metric'),
-            ).toBeInTheDocument();
-        });
+        expect(
+            await screen.findByRole('heading', {
+                name: 'Average score per Security Metric',
+            }),
+        ).toBeInTheDocument();
+        expect(screen.getByText('Metric averages')).toBeInTheDocument();
+        expect(screen.getByText('Average')).toBeInTheDocument();
+
+        expect(container.querySelectorAll('.heatmap-tick-cell span')).toHaveLength(
+            2,
+        );
+        expect(container.querySelector('.heatmap-average-tick')).toBeInTheDocument();
+
+        expect(container.querySelectorAll('.heatmap-score-cell')).toHaveLength(
+            2,
+        );
+        expect(screen.getByText('8.4')).toBeInTheDocument();
+        expect(screen.getByText('0.6')).toBeInTheDocument();
     });
 
     it('shows an error message when the response is not ok', async () => {

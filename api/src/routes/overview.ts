@@ -2,8 +2,8 @@ import { Router } from 'express';
 import { BASE_OVERVIEW, FILTERABLE_REPO_FIELDS } from '../consts';
 import type { RespOverview } from '../types/routes';
 import type { repoData } from '../types/appData';
-import sampleData from '../../data/sample/sampleRepoData.json';
 import { query } from '../db/connect';
+import type { AppDataSource } from '../types/AppDataSource';
 import {
     getAvg,
     getCountFieldNotNull,
@@ -16,11 +16,19 @@ import {
 } from '../utils/math';
 import { filterData } from '../utils/filter';
 
-const data = sampleData as repoData[];
-const router = Router();
-
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 1000;
+
+const REPO_FILTER_COLUMNS: Partial<Record<keyof repoData, string>> = {
+    university: 'university',
+    language: 'language',
+    license: 'license',
+    typePredictionGpt5Mini: 'type_prediction_gpt5_mini',
+    affiliationPredictionGpt5Mini: 'affiliation_prediction_gpt5_mini',
+    stargazersCount: 'stargazers_count',
+    forksCount: 'forks_count',
+    releaseDownloads: 'release_downloads',
+};
 
 function parseIntegerQueryValue(value: unknown): number | null {
     if (typeof value !== 'string' || value.trim() === '') {
@@ -29,6 +37,57 @@ function parseIntegerQueryValue(value: unknown): number | null {
 
     const parsed = Number(value);
     return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function buildRepoFilterClauses(
+    filters: Record<string, unknown>,
+    values: unknown[],
+): string[] {
+    const clauses: string[] = [];
+
+    for (const [fieldName, mode] of Object.entries(FILTERABLE_REPO_FIELDS)) {
+        const field = fieldName as keyof repoData;
+        const column = REPO_FILTER_COLUMNS[field];
+        const raw = filters[fieldName];
+
+        if (raw === undefined || !column) {
+            continue;
+        }
+
+        const rawValues = Array.isArray(raw) ? raw : [raw];
+        const filterValues = rawValues
+            .filter(
+                (value): value is string | number =>
+                    typeof value === 'string' || typeof value === 'number',
+            )
+            .map(String);
+
+        if (filterValues.length === 0) {
+            clauses.push('FALSE');
+            continue;
+        }
+
+        if (mode === 'exact') {
+            const placeholders = filterValues.map((value) => {
+                values.push(value.toLowerCase());
+                return `$${values.length}`;
+            });
+
+            clauses.push(`LOWER(${column}) IN (${placeholders.join(', ')})`);
+        } else if (mode === 'min') {
+            const minValue = Number(filterValues[0]);
+
+            if (!Number.isFinite(minValue)) {
+                clauses.push('FALSE');
+                continue;
+            }
+
+            values.push(minValue);
+            clauses.push(`${column} >= $${values.length}`);
+        }
+    }
+
+    return clauses;
 }
 
 // Create endpoint map: the string is the /destination and the function call gets the appropriate data
@@ -65,20 +124,31 @@ function makeResponse(rows: repoData[]): RespOverview {
     return Object.fromEntries(endpoints.map((endpoint) => [endpoint, SUB_ENDPOINTS[endpoint](rows)])) as RespOverview;
 }
 
-// Register primary GET response: build and return full RespOverview object
-router.get(BASE_OVERVIEW, (req, res) => {
-    const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
-    res.json(makeResponse(filtered));
-});
+export function createOverviewRouter(dataSource: AppDataSource) {
+    const router = Router();
 
-// Register sub GET responses for each endpoint.
-for (const endpoint of endpoints) {
-    router.get(`${BASE_OVERVIEW}/${endpoint}`, (req, res) => {
-        const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
-        const value = SUB_ENDPOINTS[endpoint](filtered);
-        res.json({ [endpoint]: value });
+    router.get(BASE_OVERVIEW, async (req, res, next) => {
+        try {
+            const data = await dataSource.getRepoData();
+            const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
+            res.json(makeResponse(filtered));
+        } catch (error) {
+            next(error);
+        }
     });
-}
+
+    for (const endpoint of endpoints) {
+        router.get(`${BASE_OVERVIEW}/${endpoint}`, async (req, res, next) => {
+            try {
+                const data = await dataSource.getRepoData();
+                const filtered = filterData(data, req.query, FILTERABLE_REPO_FIELDS);
+                const value = SUB_ENDPOINTS[endpoint](filtered);
+                res.json({ [endpoint]: value });
+            } catch (error) {
+                next(error);
+            }
+        });
+    }
 
 router.get(`${BASE_OVERVIEW}/repositories`, async (req, res, next) => {
     const limit = 
@@ -103,6 +173,17 @@ router.get(`${BASE_OVERVIEW}/repositories`, async (req, res, next) => {
         return;
     }
     try {
+        const values: unknown[] = [];
+        const filters = buildRepoFilterClauses(
+            req.query as Record<string, unknown>,
+            values,
+        );
+        const limitPlaceholder = values.push(limit);
+        const offsetPlaceholder = values.push(offset);
+        const whereClause = filters.length
+            ? `WHERE ${filters.join(' AND ')}`
+            : '';
+
         const { rows } = await query(
             `SELECT
                 university,
@@ -140,14 +221,15 @@ router.get(`${BASE_OVERVIEW}/repositories`, async (req, res, next) => {
                 type_prediction_gpt5_mini AS "typePredictionGpt5Mini"
 
             FROM public.repositories_parquet
+            ${whereClause}
             ORDER BY university, id
-            LIMIT $1 OFFSET $2
-            `, [limit, offset],
+            LIMIT $${limitPlaceholder} OFFSET $${offsetPlaceholder}`, 
+            values,
         );
         res.json(rows);
     } catch (error) {
         next(error);
     }
-});
-
-export default router;
+    },);
+    return router;
+}

@@ -3,6 +3,7 @@ import { API_URL } from '../../consts';
 import type { organizationSummary } from '../../types/dash';
 import BarChartDiv from '../charts/BarChartDiv';
 import DataBlock from '../charts/DataBlock';
+import DataBlockIcon from '../charts/DataBlockIcon';
 
 type OrganizationProps = {
     filters?: Record<string, string[] | number>;
@@ -57,52 +58,58 @@ export default function Organization({ filters }: OrganizationProps) {
     }
 
     return (
-        <div className="overview-dashboard">
-            <div className="overview-top-row">
-                <div className="overview-summary-grid">
+        <div className="dashboard">
+            <div className="dashboard-top-row">
+                <div className="dashboard-summary-grid">
                     <DataBlock
                         header="Total Organizations"
                         value={summary.totalOrganizations ?? 0}
+                        icon={<DataBlockIcon name="organizations" />}
                     />
                     <DataBlock
                         header="With URL"
                         value={`${(summary.percentOrganizationsURL ?? 0).toFixed(1)}%`}
+                        icon={<DataBlockIcon name="url" />}
                     />
                     <DataBlock
                         header="With Description"
                         value={`${(summary.percentOrganizationsDescription ?? 0).toFixed(1)}%`}
+                        icon={<DataBlockIcon name="description" />}
                     />
                     <DataBlock
                         header="With Email"
                         value={`${(summary.percentOrganizationsEmail ?? 0).toFixed(1)}%`}
+                        icon={<DataBlockIcon name="email" />}
                     />
                 </div>
+                <BarChartDiv
+                    title="Organizations Per University"
+                    endpoint="organization/orgsPerUniversity"
+                    horizontal
+                    filters={filters}
+                    xLabel="Organizations"
+                    yLabel="University"
+                />
             </div>
 
-            <BarChartDiv
-                title="Organizations Per University"
-                endpoint="organization/orgsPerUniversity"
-                horizontal
-                filters={filters}
-                xLabel="Organizations"
-                yLabel="University"
-            />
-            <BarChartDiv
-                title="Organizations Created Per Year"
-                endpoint="organization/orgsCreatedPerYear"
-                filters={filters}
-                xLabel="Year"
-                yLabel="Organizations"
-            />
-            <BarChartDiv
-                title="Profile Completeness"
-                endpoint="organization/profileCompleteness"
-                horizontal
-                filters={filters}
-                xLabel="Percent of Organizations"
-                yLabel="Field"
-                valueSuffix="%"
-            />
+            <div className="dashboard-chart-grid">
+                <BarChartDiv
+                    title="Organizations Created Per Year"
+                    endpoint="organization/orgsCreatedPerYear"
+                    filters={filters}
+                    xLabel="Year"
+                    yLabel="Organizations"
+                />
+                <BarChartDiv
+                    title="Profile Completeness"
+                    endpoint="organization/profileCompleteness"
+                    horizontal
+                    filters={filters}
+                    xLabel="Percent of Organizations"
+                    yLabel="Field"
+                    valueSuffix="%"
+                />
+            </div>
         </div>
     );
 }

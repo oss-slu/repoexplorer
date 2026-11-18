@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { BASE_ORGANIZATION, FILTERABLE_ORGS_FIELDS } from '../consts';
 import type { RespOrganization } from '../types/routes';
 import type { orgsData } from '../types/appData';
-import sampleOrgsData from '../../data/sample/sampleOrgsData.json';
+import type { AppDataSource } from '../types/AppDataSource';
 import {
     getPercentFieldNotNull,
     makeCountsArray,
@@ -10,9 +10,6 @@ import {
     makeProfileCompleteDistributionArray,
 } from '../utils/math';
 import { filterData } from '../utils/filter';
-
-const data = sampleOrgsData as orgsData[];
-const router = Router();
 
 // Create endpoint map: the string is the /destination and the function call gets the appropriate data
 const SUB_ENDPOINTS = {
@@ -33,25 +30,45 @@ function makeResponse(rows: orgsData[]): RespOrganization {
     ) as RespOrganization;
 }
 
-// Register primary GET response: build and return full RespOrganization object
-router.get(BASE_ORGANIZATION, (req, res) => {
-    const filtered = filterData(data, req.query, FILTERABLE_ORGS_FIELDS);
-    res.json(makeResponse(filtered));
-});
 
-// Register sub GET responses for each field
-// (e.g. /ORGANIZATION/totalOrganizations returns only the return value of getUniqueCount(data))
-for (const endpoint of endpoints) {
-    router.get(`${BASE_ORGANIZATION}/${endpoint}`, (req, res) => {
-        const filtered = filterData(data, req.query, FILTERABLE_ORGS_FIELDS);
-        const value = SUB_ENDPOINTS[endpoint](filtered);
-        res.json({ [endpoint]: value });
+export function createOrganizationRouter(dataSource: AppDataSource) {
+    const router = Router();
+
+    // Register primary GET response
+    router.get(BASE_ORGANIZATION, async (req, res, next) => {
+        try {
+            const data = await dataSource.getOrgsData();
+            const filtered = filterData(data, req.query, FILTERABLE_ORGS_FIELDS);
+            res.json(makeResponse(filtered));
+        } catch (error) {
+            next(error);
+        }
     });
+
+    // Register sub GET responses
+    for (const endpoint of endpoints) {
+        router.get(`${BASE_ORGANIZATION}/${endpoint}`, async (req, res, next) => {
+            try {
+                const data = await dataSource.getOrgsData();
+                const filtered = filterData(data, req.query, FILTERABLE_ORGS_FIELDS);
+                const value = SUB_ENDPOINTS[endpoint](filtered);
+                res.json({ [endpoint]: value });
+            } catch (error) {
+                next(error);
+            }
+        });
+    }
+
+    // Register organizations table endpoint
+    router.get(`${BASE_ORGANIZATION}/organizations`, async (req, res, next) => {
+        try {
+            const data = await dataSource.getOrgsData();
+            const filtered = filterData(data, req.query, FILTERABLE_ORGS_FIELDS);
+            res.json(filtered);
+        } catch (error) {
+            next(error);
+        }
+    });
+
+    return router;
 }
-
-router.get(`${BASE_ORGANIZATION}/organizations`, (req, res) => {
-    const filtered = filterData(data, req.query, FILTERABLE_ORGS_FIELDS);
-    res.json(filtered);
-});
-
-export default router;
