@@ -3,6 +3,8 @@ import { API_URL, MAX_VISIBLE_ROWS } from '../../consts';
 import type { chartProps } from '../../types/charts';
 import { formatLabel } from '../../utils/formatLabel';
 
+const REPO_PAGE_SIZE = 500;
+
 export default function DataTable({
     title,
     endpoint,
@@ -25,14 +27,21 @@ export default function DataTable({
     const [loading, setLoading] = useState<boolean>(Boolean(endpoint));
     const [error, setError] = useState<string>('');
     const [searchQuery, setSearchQuery] = useState<string>('');
-    const queryString = new URLSearchParams();
     const [selectedRow, setSelectedRow] = useState<Record<
         string,
         unknown
     > | null>(null);
     const [firstVisibleRow, setFirstVisibleRow] = useState(1);
     const [lastVisibleRow, setLastVisibleRow] = useState(MAX_VISIBLE_ROWS);
+    const [repoOffset, setRepoOffset] = useState(0);
+    const [hasMoreRepos, setHasMoreRepos] = useState(true);
+    const [scrollTop, setScrollTop] = useState(0);
+    const [loadingMore, setLoadingMore] = useState(false);
+
     const tableContainerRef = useRef<HTMLDivElement>(null);
+    const loadingMoreRef = useRef(false);
+    const isRepoBrowse = endpoint === 'overview/repositories';
+
     const COLUMN_WIDTHS: Record<string, string> = {
         name: '180px',
         university: '180px',
@@ -54,10 +63,7 @@ export default function DataTable({
         value: '100px',
     };
 
-    const getColumnWidth = (header: string) => {
-        const key = header.replace(/[_\s-]/g, '').toLowerCase();
-        return COLUMN_WIDTHS[key] ?? '150px';
-    };
+    const queryString = new URLSearchParams();
 
     Object.entries(filters).forEach(([key, value]) => {
         if (Array.isArray(value)) {
@@ -66,31 +72,105 @@ export default function DataTable({
             queryString.append(key, String(value));
         }
     });
-
+    
     const queryParams = queryString.toString();
+    const requestKey = `${endpoint ?? ''}|${queryParams}`;
+    const requestKeyRef = useRef(requestKey);
+
+    const [totalRepoCount, setTotalRepoCount] = useState<number | null>(null);
+
+
+    const getColumnWidth = (header: string) => {
+        const key = header.replace(/[_\s-]/g, '').toLowerCase();
+        return COLUMN_WIDTHS[key] ?? '150px';
+    };
 
     useEffect(() => {
         if (!endpoint) {
             return;
         }
 
+        if (requestKeyRef.current !== requestKey) {
+            requestKeyRef.current = requestKey;
+
+            setData([]);
+            setRepoOffset(0);
+            setHasMoreRepos(true);
+            setScrollTop(0);
+
+            if (tableContainerRef.current) {
+                tableContainerRef.current.scrollTop = 0;
+            }
+
+            if (repoOffset !== 0) {
+                return;
+            }
+        }
+
         const controller = new AbortController();
+        const isFirstPage = !isRepoBrowse || repoOffset === 0;
 
         const fetchData = async () => {
             try {
-                setLoading(true);
                 setError('');
 
+                if (isFirstPage) {
+                    setLoading(true);
+                    setLoadingMore(false);
+                    loadingMoreRef.current = false;
+                } else {
+                    setLoadingMore(true);
+                    loadingMoreRef.current = true;
+                }
+
+                const params = new URLSearchParams(queryParams);
+                if (isRepoBrowse) {
+                    params.set('limit', String(REPO_PAGE_SIZE));
+                    params.set('offset', String(repoOffset));
+                }
+
+                const serializedParams = params.toString();
+
                 const url = `${API_URL}/${endpoint}${
-                    queryParams ? `?${queryParams}` : ''
+                    serializedParams ? `?${serializedParams}` : ''
                 }`;
 
-                const resp = await fetch(url, {
-                    signal: controller.signal,
-                });
+                const pageRequest = fetch(url, {signal: controller.signal });
+
+                const countRequest =
+                    isRepoBrowse && repoOffset === 0
+                        ? fetch(
+                            `${API_URL}/${endpoint}/count${
+                                queryParams ? `?${queryParams}` : ''
+                            }`,
+                            {signal: controller.signal},
+                        )
+                        : null;
+                
+                const [resp, countResp] = await Promise.all([
+                    pageRequest,
+                    countRequest,
+                ]);
 
                 if (!resp.ok) {
                     throw new Error(`Error fetching data: ${resp.status}`);
+                }
+
+                if (countResp) {
+                    if (!countResp.ok) {
+                        throw new Error(`Error fetching repository count: ${countResp.status}`)
+                    }
+
+                    const countJson: { totalCount?: unknown } = await countResp.json();
+
+                    if (
+                        typeof countJson.totalCount !== 'number' ||
+                        !Number.isFinite(countJson.totalCount)
+                    ) {
+                        throw new Error('Invalid repository count response');
+                    }
+
+                    setTotalRepoCount(countJson.totalCount);
                 }
 
                 const json = await resp.json();
@@ -103,7 +183,15 @@ export default function DataTable({
                     ? json
                     : (Object.values(json)[0] as Record<string, unknown>[]);
 
-                setData(arr);
+                setData((currentData) =>
+                    isRepoBrowse && repoOffset > 0
+                    ?[...currentData, ...arr]
+                    : arr,
+                );
+
+                if (isRepoBrowse) {
+                    setHasMoreRepos(arr.length === REPO_PAGE_SIZE);
+                }
             } catch (err) {
                 if (controller.signal.aborted) {
                     return;
@@ -116,14 +204,52 @@ export default function DataTable({
             } finally {
                 if (!controller.signal.aborted) {
                     setLoading(false);
+                    setLoadingMore(false);
+                    loadingMoreRef.current = false;
                 }
             }
         };
 
         void fetchData();
 
-        return () => controller.abort();
-    }, [endpoint, queryParams]);
+        return () => {
+            controller.abort();
+            loadingMoreRef.current = false;
+        }
+    }, [endpoint, queryParams, isRepoBrowse, repoOffset, requestKey]);
+
+    useEffect(() => {
+        if (
+            !isRepoBrowse ||
+            !hasMoreRepos ||
+            loading ||
+            loadingMore ||
+            loadingMoreRef.current
+        ) {
+            return;
+        }
+
+        const container = tableContainerRef.current;
+        if (!container) {
+            return;
+        }
+
+        const nearBottom =
+            scrollTop + container.clientHeight >=
+            container.scrollHeight - 200;
+        
+        if (nearBottom) {
+            loadingMoreRef.current = true;
+            setRepoOffset((currentOffset) => currentOffset + REPO_PAGE_SIZE);
+        }
+    }, [
+        data.length,
+        hasMoreRepos,
+        isRepoBrowse,
+        loading,
+        loadingMore,
+        scrollTop,
+    ]);
 
     useEffect(() => {
         const container = tableContainerRef.current;
@@ -152,11 +278,11 @@ export default function DataTable({
         }
     }, [data, searchQuery, scrollable, maxRows]);
 
-    if (loading) {
+    if (loading && data.length === 0) {
         return <div>Loading {title}...</div>;
     }
 
-    if (error) {
+    if (error && data.length === 0) {
         return (
             <div>
                 Failed to load {title}: {error}
@@ -213,6 +339,11 @@ export default function DataTable({
         );
     });
 
+    const rowCount =
+        isRepoBrowse && totalRepoCount !== null
+            ? totalRepoCount
+            : filteredData.length;
+
     const handleDownload = () => {
         if (filteredData.length === 0) return;
 
@@ -241,6 +372,7 @@ export default function DataTable({
     function handleTableScroll(event: React.UIEvent<HTMLDivElement>) {
         const container = event.currentTarget;
         const rows = container.querySelectorAll('tbody tr');
+        setScrollTop(container.scrollTop);
 
         if (rows.length === 0) {
             setFirstVisibleRow(0);
@@ -405,6 +537,11 @@ export default function DataTable({
                 </div>
             )}
 
+            {loadingMore && <p>Loading more repositories...</p>}
+            {error && data.length > 0 && (
+                <p>Failed to load {title}: {error}</p>
+            )}
+
             {showRowMessage && (
                 <p
                     style={{
@@ -414,7 +551,7 @@ export default function DataTable({
                     }}
                 >
                     Viewing rows {filteredData.length > 0 ? firstVisibleRow : 0}{' '}
-                    through {lastVisibleRow} of {filteredData.length}
+                    through {lastVisibleRow} of {rowCount}
                 </p>
             )}
 

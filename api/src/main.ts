@@ -24,9 +24,7 @@ async function main() {
 
     const app = createApp(VITE_ORIGIN, dataSource);
 
-    app.listen(PORT, () =>
-        console.log(`API listening on port ${PORT} at ${MMDDYY_HHMMSS(new Date())}...`),
-    );
+    app.listen(PORT, () => console.log(`API listening on port ${PORT} at ${MMDDYY_HHMMSS(new Date())}...`));
 
     if (dataSourceType === 'postgres') {
         process.on('SIGTERM', () => void closeDB());

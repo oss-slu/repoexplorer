@@ -9,14 +9,13 @@ import { createSustainabilityRouter } from './routes/sustainability';
 import { createOrganizationRouter } from './routes/organization';
 import { PostgresDataSource, JsonDataSource } from './db/dataSource';
 
-export const ROUTES = [
-    { router: health, route: '/health' },
-];
+export const ROUTES = [{ router: health, route: '/health' }];
 
 export function createApp(
     origin?: string,
     dataSource: AppDataSource = process.env.DATA_SOURCE === 'postgres'
-        ? new PostgresDataSource() : new JsonDataSource(), 
+        ? new PostgresDataSource()
+        : new JsonDataSource(),
 ) {
     const app = express();
 
