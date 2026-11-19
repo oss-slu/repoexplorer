@@ -150,6 +150,30 @@ export function createOverviewRouter(dataSource: AppDataSource) {
         });
     }
 
+router.get(`${BASE_OVERVIEW}/repositories/count`, async (req, res, next) => {
+    try {
+        const values: unknown[] = [];
+        const filters = buildRepoFilterClauses(
+            req.query as Record<string, unknown>,
+            values,
+        );
+        const whereClause = filters.length
+            ? `WHERE ${filters.join(' AND ')}`
+            : '';
+
+        const { rows } = await query<{ totalCount: number | string }>(
+            `SELECT COUNT(*) AS "totalCount"
+            FROM public.repositories_parquet
+            ${whereClause}`,
+            values,
+        );
+
+        res.json({ totalCount: Number(rows[0]?.totalCount ?? 0) });
+    } catch (error) {
+        next(error);
+    }
+});
+
 router.get(`${BASE_OVERVIEW}/repositories`, async (req, res, next) => {
     const limit = 
         req.query.limit === undefined

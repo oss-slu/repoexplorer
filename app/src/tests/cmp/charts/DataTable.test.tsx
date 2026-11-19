@@ -67,6 +67,40 @@ describe('DataTable', () => {
         ).toBeInTheDocument();
     });
 
+    it('shows full repository count when only first page loaded', async () => {
+        const firstPage = Array.from({ length: 500 }, (_, index) => ({
+            fullName: `Repository ${index + 1}`,
+        }));
+
+        globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+            const url = new URL(String(input), 'http://localhost');
+
+            if (url.pathname.endsWith('/count')) {
+                return {
+                    ok: true,
+                    json: async () => ({ totalCount: 129101 }),
+                } as Response;
+            }
+
+            return {
+                ok: true,
+                json: async () => firstPage,
+            } as Response;
+        }) as typeof fetch;
+
+        render(
+            <DataTable
+                title="Browse Repositories"
+                endpoint="overview/repositories"
+                scrollable
+                showRowMessage
+            />,
+        );
+
+        expect(await screen.findByText(/of 129101/)).toBeInTheDocument();
+        expect(screen.getByText('Repository 500')).toBeInTheDocument();
+    });
+
     it('loads next 500 repositories when scrolling near bottom', async () => {
         const firstPage = Array.from({ length: 500 }, (_, index) => ({
             fullName: `Repository ${index + 1}`,
@@ -75,6 +109,14 @@ describe('DataTable', () => {
 
         const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
             const url = new URL(String(input), 'http://localhost');
+
+            if (url.pathname.endsWith('/count')) {
+                return {
+                    ok: true,
+                    json: async () => ({ totalCount: 501 }),
+                } as Response;
+            }
+
             const rows =
                 url.searchParams.get('offset') === '0' ? firstPage: secondPage;
 
@@ -125,9 +167,9 @@ describe('DataTable', () => {
                 await screen.findByText('Repository 501'),
             ).toBeInTheDocument();
 
-            const requestedUrls = fetchMock.mock.calls.map(([input]) =>
-                new URL(String(input), 'http://localhost'),
-            );
+            const requestedUrls = fetchMock.mock.calls
+                .map(([input]) => new URL(String(input), 'http://localhost'))
+                .filter((url) => !url.pathname.endsWith('/count'));
 
             expect(requestedUrls).toHaveLength(2);
             expect(requestedUrls[0].searchParams.get('limit')).toBe('500');

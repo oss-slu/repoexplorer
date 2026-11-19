@@ -77,6 +77,8 @@ export default function DataTable({
     const requestKey = `${endpoint ?? ''}|${queryParams}`;
     const requestKeyRef = useRef(requestKey);
 
+    const [totalRepoCount, setTotalRepoCount] = useState<number | null>(null);
+
 
     const getColumnWidth = (header: string) => {
         const key = header.replace(/[_\s-]/g, '').toLowerCase();
@@ -133,12 +135,42 @@ export default function DataTable({
                     serializedParams ? `?${serializedParams}` : ''
                 }`;
 
-                const resp = await fetch(url, {
-                    signal: controller.signal,
-                });
+                const pageRequest = fetch(url, {signal: controller.signal });
+
+                const countRequest =
+                    isRepoBrowse && repoOffset === 0
+                        ? fetch(
+                            `${API_URL}/${endpoint}/count${
+                                queryParams ? `?${queryParams}` : ''
+                            }`,
+                            {signal: controller.signal},
+                        )
+                        : null;
+                
+                const [resp, countResp] = await Promise.all([
+                    pageRequest,
+                    countRequest,
+                ]);
 
                 if (!resp.ok) {
                     throw new Error(`Error fetching data: ${resp.status}`);
+                }
+
+                if (countResp) {
+                    if (!countResp.ok) {
+                        throw new Error(`Error fetching repository count: ${countResp.status}`)
+                    }
+
+                    const countJson: { totalCount?: unknown } = await countResp.json();
+
+                    if (
+                        typeof countJson.totalCount !== 'number' ||
+                        !Number.isFinite(countJson.totalCount)
+                    ) {
+                        throw new Error('Invalid repository count response');
+                    }
+
+                    setTotalRepoCount(countJson.totalCount);
                 }
 
                 const json = await resp.json();
@@ -306,6 +338,11 @@ export default function DataTable({
             String(val).toLowerCase().includes(searchQuery.toLowerCase()),
         );
     });
+
+    const rowCount =
+        isRepoBrowse && totalRepoCount !== null
+            ? totalRepoCount
+            : filteredData.length;
 
     const handleDownload = () => {
         if (filteredData.length === 0) return;
@@ -514,7 +551,7 @@ export default function DataTable({
                     }}
                 >
                     Viewing rows {filteredData.length > 0 ? firstVisibleRow : 0}{' '}
-                    through {lastVisibleRow} of {filteredData.length}
+                    through {lastVisibleRow} of {rowCount}
                 </p>
             )}
 

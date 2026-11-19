@@ -13,11 +13,28 @@ jest.unstable_mockModule('../../db/connect', () => ({
     query: queryMock,
 }));
 
-const{  createApp } = await import('../../app');
+const { createApp } = await import('../../app');
 
 describe ('GET /overview/repositories', () => {
     beforeEach(() => {
         queryMock.mockReset();
+    });
+
+    it('returns the total repository count for selected filters', async () => {
+        queryMock.mockResolvedValue({ rows: [{ totalCount: '129101'}] });
+
+        const response = await request(createApp())
+            .get('/overview/repositories/count')
+            .query({ university: 'Saint Louis University' });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({ totalCount: 129101 });
+        expect(queryMock).toHaveBeenCalledWith(
+            expect.stringMatching(
+                /SELECT COUNT\(\*\) AS "totalCount"[\s\S]*FROM public\.repositories_parquet[\s\S]*WHERE LOWER\(university\) IN \(\$1\)/,
+            ),
+            ['saint louis university'],
+        );
     });
 
     it('defaults to 500 rows and queries the parquet repository table', async () => {
