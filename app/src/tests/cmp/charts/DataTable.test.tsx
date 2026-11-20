@@ -45,12 +45,21 @@ describe('DataTable', () => {
         const ucscRow = await screen.findByRole('row', {
             name: 'University of California, Santa Cruz 150',
         });
-        expect(
-            within(sluRow).getByRole('cell', { name: '275' }),
-        ).toBeInTheDocument();
+        const sluCountCell = within(sluRow).getByRole('cell', { name: '275' });
+        const universityCell = within(sluRow).getByRole('cell', {
+            name: 'Saint Louis University',
+        });
+        expect(sluCountCell).toBeInTheDocument();
         expect(
             within(ucscRow).getByRole('cell', { name: '150' }),
         ).toBeInTheDocument();
+
+        expect(sluCountCell).toHaveClass(
+            'data-table__cell',
+            'data-table__cell--count'
+        );
+        expect(universityCell).toHaveClass('data-table__cell');
+        expect(universityCell).not.toHaveClass('data-table__cell--count');
     });
 
     it('renders an error massage on fetch failure', async () => {
