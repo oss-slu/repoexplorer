@@ -402,32 +402,18 @@ export default function DataTable({
     }
 
     return (
-        <div style={{ width: '100%', overflowX: 'auto', marginBottom: '24px' }}>
-            <h2 style={{ textAlign: 'left' }}>{title}</h2>
+        <div className="data-table">
+            <h2 className="data-table__title">{title}</h2>
 
             {showSearch && (
-                <div style={{ marginBottom: '16px' }}>
-                    <label
-                        style={{
-                            display: 'block',
-                            marginBottom: '4px',
-                            fontWeight: 'bold',
-                        }}
-                    >
-                        Search
-                    </label>
+                <div className="data-table__search">
+                    <label className="data-table__search-label">Search</label>
                     <input
                         type="text"
                         placeholder="Search table..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        style={{
-                            padding: '8px',
-                            width: '100%',
-                            borderRadius: '4px',
-                            border: '1px solid #ccc',
-                            boxSizing: 'border-box',
-                        }}
+                        className="data-table__search-input"
                     />
                 </div>
             )}
@@ -438,43 +424,24 @@ export default function DataTable({
                 <div
                     ref={tableContainerRef}
                     onScroll={handleTableScroll}
-
+                    className={`data-table__viewport${scrollable ? ' data-table__viewport--scrollable' : ''}`}
                     style={{
                         height: scrollable
                             ? `${maxRows * 43 + 45}px`
                             : undefined,
-                        overflowY: scrollable ? 'auto' : undefined,
-                        overflowX: 'auto',
-                        position: 'relative',
                     }}
                 >
-                    <table
-                        style={{
-                            width: 'max-content',
-                            minWidth: '100%',
-                            tableLayout: 'fixed',
-                            borderCollapse: 'collapse',
-                        }}
-                    >
+                    <table className="data-table__table">
                         <thead>
-                            <tr
-                                style={{
-                                    borderBottom: '2px solid #ddd',
-                                    textAlign: 'left',
-                                }}
-                            >
+                            <tr>
                                 {headers.map((header) => (
                                     <th
                                         key={header}
+                                        className="data-table__header"
                                         style={{
-                                            padding: '12px 8px',
                                             width: getColumnWidth(header),
                                             minWidth: getColumnWidth(header),
                                             maxWidth: getColumnWidth(header),
-                                            position: 'sticky',
-                                            top: 0,
-                                            backgroundColor: '#fff',
-                                            zIndex: 2,
                                         }}
                                     >
                                         {header === 'name'
@@ -490,6 +457,7 @@ export default function DataTable({
                             {filteredData.map((row, index) => (
                                 <tr
                                     key={index}
+                                    className={`data-table__row${onRowClick ? ' data-table__row--clickable' : ''}`}
                                     onClick={() => {
                                         if (onRowClick) {
                                             setSelectedRow(row);
@@ -497,10 +465,6 @@ export default function DataTable({
                                         }
                                     }}
                                     style={{
-                                        borderBottom: '1px solid #eee',
-                                        cursor: onRowClick
-                                            ? 'pointer'
-                                            : 'default',
                                         backgroundColor:
                                             selectedRow === row
                                                 ? '#e8f0fe'
@@ -510,17 +474,13 @@ export default function DataTable({
                                     {headers.map((header) => (
                                         <td
                                             key={header}
+                                            className={`data-table__cell${header === 'value' ? ' data-table__cell--count' : ''}`}
                                             style={{
-                                                padding: '8px 10px',
                                                 width: getColumnWidth(header),
                                                 minWidth:
                                                     getColumnWidth(header),
                                                 maxWidth:
                                                     getColumnWidth(header),
-                                                whiteSpace: 'normal',
-                                                wordBreak: 'break-word',
-                                                verticalAlign: 'top',
-                                                boxSizing: 'border-box',
                                             }}
                                         >
                                             {typeof row[header] === 'number'
@@ -543,13 +503,7 @@ export default function DataTable({
             )}
 
             {showRowMessage && (
-                <p
-                    style={{
-                        marginTop: '16px',
-                        fontSize: '14px',
-                        color: '#333',
-                    }}
-                >
+                <p className="data-table__row-message">
                     Viewing rows {filteredData.length > 0 ? firstVisibleRow : 0}{' '}
                     through {lastVisibleRow} of {rowCount}
                 </p>
@@ -558,15 +512,7 @@ export default function DataTable({
             {showDownload && (
                 <button
                     onClick={handleDownload}
-                    style={{
-                        marginTop: '8px',
-                        padding: '8px',
-                        width: '100%',
-                        backgroundColor: '#f1f1f1',
-                        border: '1px solid #ccc',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                    }}
+                    className="data-table__download"
                 >
                     Download
                 </button>
