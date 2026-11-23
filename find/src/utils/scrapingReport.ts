@@ -19,7 +19,7 @@ import {
 import { describeSkippedRepositoryReason } from './scrapingError';
 
 export type ScrapingReport = {
-    schemaVersion: 3;
+    schemaVersion: 4;
     startedAt: string;
     finishedAt: string;
     policy: ScrapingPolicy;
@@ -31,6 +31,7 @@ export type ScrapingReport = {
         interruptedUniversities: number;
         notRunUniversities: number;
         committedAssociations: number;
+        unchangedRepositories: number;
         skippedOwners: number;
         skippedRepositories: number;
         textWarnings: number;
@@ -41,6 +42,7 @@ export type ScrapingReport = {
         status: ScrapeUniversityOutcome['status'];
         discoveredRepositories?: number;
         committedAssociations: number;
+        unchangedRepositories: number;
         skippedOwners: SkippedOwner[];
         skippedRepositories: SkippedRepository[];
         warnings: ScrapingWarning[];
@@ -62,6 +64,7 @@ export function createScrapingReport(input: {
                 university: clean(outcome.university),
                 status: outcome.status,
                 committedAssociations: 0,
+                unchangedRepositories: 0,
                 skippedOwners: [],
                 skippedRepositories: [],
                 warnings: [],
@@ -75,6 +78,7 @@ export function createScrapingReport(input: {
                 status: outcome.status,
                 discoveredRepositories: outcome.discovered,
                 committedAssociations: 0,
+                unchangedRepositories: 0,
                 skippedOwners: sanitizeSkippedOwners(outcome.skippedOwners),
                 skippedRepositories: sanitizeSkippedRepositories(
                     outcome.skippedRepositories,
@@ -91,6 +95,7 @@ export function createScrapingReport(input: {
                 status: outcome.status,
                 discoveredRepositories: outcome.discovered,
                 committedAssociations: 0,
+                unchangedRepositories: 0,
                 skippedOwners: sanitizeSkippedOwners(outcome.skippedOwners),
                 skippedRepositories: sanitizeSkippedRepositories(
                     outcome.skippedRepositories,
@@ -105,6 +110,7 @@ export function createScrapingReport(input: {
             status: outcome.status,
             discoveredRepositories: outcome.discovered,
             committedAssociations: outcome.committed,
+            unchangedRepositories: outcome.unchanged,
             skippedOwners: sanitizeSkippedOwners(outcome.skippedOwners),
             skippedRepositories: sanitizeSkippedRepositories(
                 outcome.skippedRepositories,
@@ -123,7 +129,7 @@ export function createScrapingReport(input: {
     const warnings = universities.flatMap((university) => university.warnings);
 
     return {
-        schemaVersion: 3,
+        schemaVersion: 4,
         startedAt: input.startedAt.toISOString(),
         finishedAt: input.finishedAt.toISOString(),
         policy: input.policy,
@@ -145,6 +151,7 @@ export function createScrapingReport(input: {
                 (university) => university.status === 'not_run',
             ).length,
             committedAssociations: input.result.committed,
+            unchangedRepositories: input.result.unchanged,
             skippedOwners,
             skippedRepositories,
             textWarnings: warnings.length,

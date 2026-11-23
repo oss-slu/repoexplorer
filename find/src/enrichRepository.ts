@@ -42,6 +42,8 @@ type RepositoryPayload = {
     html_url?: string | null;
     description?: string | null;
     fork: boolean;
+    archived?: boolean | null;
+    is_template?: boolean | null;
     created_at: string;
     updated_at: string;
     pushed_at?: string | null;
@@ -295,6 +297,8 @@ async function enrichRepositoryRecord(
         htmlUrl: optionalString(repository.html_url, 'html_url'),
         description: optionalString(repository.description, 'description'),
         fork: repository.fork ? 1 : 0,
+        archived: repository.archived ?? null,
+        isTemplate: repository.is_template ?? null,
         createdAt: normalizeTimestamp(repository.created_at, 'created_at'),
         updatedAt: normalizeTimestamp(repository.updated_at, 'updated_at'),
         pushedAt: nullableTimestamp(repository.pushed_at, 'pushed_at'),
@@ -1483,10 +1487,16 @@ function parseRepositoryPayload(
     }
     if (
         typeof record.private !== 'boolean' ||
-        typeof record.fork !== 'boolean'
+        typeof record.fork !== 'boolean' ||
+        (record.archived !== undefined &&
+            record.archived !== null &&
+            typeof record.archived !== 'boolean') ||
+        (record.is_template !== undefined &&
+            record.is_template !== null &&
+            typeof record.is_template !== 'boolean')
     ) {
         throw new TypeError(
-            `Repository ${candidate.fullName} has invalid visibility or fork data`,
+            `Repository ${candidate.fullName} has invalid visibility, eligibility, or fork data`,
         );
     }
     return record as unknown as RepositoryPayload;

@@ -12,7 +12,79 @@ export type UniversityConfiguration = {
     key: string;
     fullName: string;
     acronym: string;
+    emailDomains?: string[];
+    additionalQueries?: string[];
+    affiliationDefinition?: string;
+    /**
+     * Other names people write for this institution (for example
+     * "UC Santa Cruz"). The affiliation evidence gate treats each like the
+     * full name.
+     */
+    alternateNames?: string[];
+    /**
+     * Names of other institutions that contain this one's name or acronym
+     * (for example "Saint Louis University Baguio"). Evidence mentioning one
+     * never satisfies the affiliation evidence gate.
+     */
+    excludedNames?: string[];
     queries?: SearchQueries;
+};
+
+export type TextTruncationConfiguration = {
+    mode: 'start' | 'start_end';
+    maxChars: number;
+    startChars: number;
+    endChars: number;
+};
+
+export type ResponseFormatMode = 'json_schema' | 'json_object' | 'text';
+
+export const REASONING_EFFORTS = [
+    'none',
+    'minimal',
+    'low',
+    'medium',
+    'high',
+    'xhigh',
+] as const;
+
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+export type ClassificationGenerationSettings = {
+    responseFormat: ResponseFormatMode;
+    /** Omitted from requests when unset; GPT-5 reasoning models reject any value other than their default. */
+    temperature?: number;
+    /** With `max_completion_tokens`, this budget includes reasoning tokens. */
+    maxOutputTokens: number;
+    maxOutputTokensField: 'max_tokens' | 'max_completion_tokens';
+    /** Sent as `reasoning_effort` only when set. */
+    reasoningEffort?: ReasoningEffort;
+    seed?: number;
+};
+
+export type ClassificationCitationMode = 'exact_quote' | 'evidence_id';
+
+/**
+ * `names_institution` downgrades a supported affiliation to uncertain unless
+ * one of its accepted citations names the institution; `off` keeps the
+ * model's decision.
+ */
+export type AffiliationEvidenceGate = 'names_institution' | 'off';
+
+export type ClassificationConfiguration = {
+    provider: string;
+    baseUrl: string;
+    model: string;
+    apiKeyEnv: string;
+    threshold: number;
+    concurrency: number;
+    timeoutMs: number;
+    maxRetries: number;
+    promptVersion: string;
+    citationMode: ClassificationCitationMode;
+    affiliationEvidenceGate: AffiliationEvidenceGate;
+    truncation: TextTruncationConfiguration;
+    generation: ClassificationGenerationSettings;
 };
 
 export type ScrapingConfiguration = {
@@ -21,6 +93,7 @@ export type ScrapingConfiguration = {
     databaseBatchSize: number;
     /** Defaults to `graphql` when the client is authenticated; `rest` restores per-repository REST reads. */
     enrichmentApi?: EnrichmentApi;
+    classification?: ClassificationConfiguration;
 };
 
 export type EnrichmentApi = 'graphql' | 'rest';
@@ -136,6 +209,8 @@ export type RepositoryScrapingRecord = {
     htmlUrl: string | null;
     description: string | null;
     fork: 0 | 1;
+    archived: boolean | null;
+    isTemplate: boolean | null;
     createdAt: string | null;
     updatedAt: string | null;
     pushedAt: string | null;
@@ -163,11 +238,69 @@ export type RepositoryScrapingRecord = {
     scrapedAt: string;
 };
 
+export type ClassificationTask = 'affiliation' | 'project_type';
+
+export type ClassificationStatus =
+    | 'predicted'
+    | 'below_threshold'
+    | 'not_supported'
+    | 'uncertain'
+    | 'ineligible'
+    | 'skipped_threshold'
+    | 'skipped_eligibility'
+    | 'skipped_affiliation_failed'
+    | 'skipped_affiliation_uncertain'
+    | 'skipped_affiliation_rejected'
+    | 'failed';
+
+export type ClassificationCandidate = {
+    id: number;
+    university: string;
+    fullName: string | null;
+    owner: string;
+    htmlUrl: string | null;
+    description: string | null;
+    readme: string | null;
+    homepage: string | null;
+    language: string | null;
+    license: string | null;
+    fork: number;
+    archived: boolean | null;
+    isTemplate: boolean | null;
+    size: number;
+    stargazersCount: number;
+    forksCount: number;
+    contributors: string | null;
+};
+
+export type ClassificationPrediction = {
+    id: number;
+    university: string;
+    task: ClassificationTask;
+    provider: string;
+    model: string;
+    promptVersion: string;
+    threshold: number;
+    inputHash: string;
+    score: number | null;
+    category: string | null;
+    affiliationDecision: 'supported' | 'not_supported' | 'uncertain' | null;
+    affiliationRelationship: string | null;
+    affiliationEvidence: Array<{ field: string; quote: string }> | null;
+    explanation: string | null;
+    status: ClassificationStatus;
+    simulated: boolean;
+    errorMessage: string | null;
+    classifiedAt: string;
+};
+
 export type ScrapeUniversityResult = {
     status: 'complete' | 'partial';
     university: string;
     discovered: number;
     committed: number;
+    /** Repositories kept as published after a 304; they are not rewritten, so `committed` excludes them. */
+    unchanged: number;
     skippedOwners: SkippedOwner[];
     skippedRepositories: SkippedRepository[];
     warnings: ScrapingWarning[];
@@ -207,6 +340,7 @@ export type ScrapingRunResult = {
     elapsedMs: number;
     universitiesProcessed: number;
     committed: number;
+    unchanged: number;
     failed: number;
     interrupted: number;
     partial: number;

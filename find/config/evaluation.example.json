@@ -1,0 +1,25 @@
+{
+    "provider": "ollama-openai-compatible",
+    "baseUrl": "http://127.0.0.1:11434/v1",
+    "model": "llama3.2:3b",
+    "apiKeyEnv": "OLLAMA_API_KEY",
+    "threshold": 0.4,
+    "concurrency": 1,
+    "timeoutMs": 120000,
+    "maxRetries": 1,
+    "promptVersion": "v3",
+    "affiliationEvidenceGate": "names_institution",
+    "citationMode": "exact_quote",
+    "generation": {
+        "responseFormat": "json_schema",
+        "temperature": 0,
+        "maxOutputTokens": 512,
+        "maxOutputTokensField": "max_tokens"
+    },
+    "truncation": {
+        "mode": "start_end",
+        "maxChars": 12000,
+        "startChars": 9000,
+        "endChars": 3000
+    }
+}

@@ -15,6 +15,7 @@ import {
 } from '../utils/scrapingReport';
 import type {
     ScrapeUniversityFailure,
+    ScrapeUniversityResult,
     ScrapingRunResult,
     SkippedOwner,
     SkippedRepository,
@@ -89,6 +90,7 @@ function reportResult(): ScrapingRunResult {
         university: 'University',
         discovered: 0,
         committed: 0,
+        unchanged: 0,
         skippedOwners: [sensitiveSkippedOwner],
         skippedRepositories: [],
         warnings: [],
@@ -97,6 +99,7 @@ function reportResult(): ScrapingRunResult {
         elapsedMs: 0,
         universitiesProcessed: 2,
         committed: 0,
+        unchanged: 0,
         failed: 1,
         interrupted: 0,
         partial: 1,
@@ -123,7 +126,7 @@ test('writes a machine-readable report with outcomes, counts, and sanitized owne
         const parsed = JSON.parse(contents) as typeof report;
 
         expect(parsed).toMatchObject({
-            schemaVersion: 3,
+            schemaVersion: 4,
             startedAt: '2026-10-24T10:00:00.000Z',
             finishedAt: '2026-10-24T10:02:00.000Z',
             policy: 'best-effort',
@@ -220,7 +223,7 @@ test('writes a machine-readable report with outcomes, counts, and sanitized owne
     }
 });
 
-test('schema v3 reports interruption separately from failure and not-run outcomes', () => {
+test('schema v4 reports interruption separately from failure and not-run outcomes', () => {
     const cancellation = new ScrapingCancellationError('SIGTERM');
     const interrupted = {
         status: 'interrupted' as const,
@@ -242,6 +245,7 @@ test('schema v3 reports interruption separately from failure and not-run outcome
             elapsedMs: 60_000,
             universitiesProcessed: 1,
             committed: 0,
+            unchanged: 0,
             failed: 0,
             interrupted: 1,
             partial: 0,
@@ -256,7 +260,7 @@ test('schema v3 reports interruption separately from failure and not-run outcome
     });
     const contents = JSON.stringify(report);
 
-    expect(report.schemaVersion).toBe(3);
+    expect(report.schemaVersion).toBe(4);
     expect(report.summary).toMatchObject({
         universitiesConfigured: 3,
         completeUniversities: 0,
@@ -306,6 +310,7 @@ test('reports legal skips with a static reason and preserves the safe request ID
         university: 'University',
         discovered: 1,
         committed: 0,
+        unchanged: 0,
         skippedOwners: [],
         skippedRepositories: [legalSkip],
         warnings: [],
@@ -319,6 +324,7 @@ test('reports legal skips with a static reason and preserves the safe request ID
             elapsedMs: 0,
             universitiesProcessed: 1,
             committed: 0,
+            unchanged: 0,
             failed: 0,
             interrupted: 0,
             partial: 1,
@@ -359,6 +365,7 @@ test('surfaces report-writing failures to the caller', async () => {
             elapsedMs: 0,
             universitiesProcessed: 0,
             committed: 0,
+            unchanged: 0,
             failed: 0,
             interrupted: 0,
             partial: 0,
@@ -427,6 +434,7 @@ test('serializes additive search and access diagnostics without private evidence
             elapsedMs: 0,
             universitiesProcessed: 2,
             committed: 0,
+            unchanged: 0,
             failed: 2,
             interrupted: 0,
             partial: 0,
@@ -475,7 +483,7 @@ test('serializes additive search and access diagnostics without private evidence
     });
     const contents = JSON.stringify(report);
 
-    expect(report.schemaVersion).toBe(3);
+    expect(report.schemaVersion).toBe(4);
     expect(report.universities[0]).toMatchObject({
         failureReason: formatScrapingDiagnostic(
             report.universities[0].diagnostics!,
@@ -541,6 +549,7 @@ test('reports database batch diagnostics without SQL values or PostgreSQL detail
             elapsedMs: 120_000,
             universitiesProcessed: 1,
             committed: 0,
+            unchanged: 0,
             failed: 1,
             interrupted: 0,
             partial: 0,
@@ -569,6 +578,7 @@ test('counts complete, partial, failed, and not-run universities independently',
         university: 'Complete',
         discovered: 1,
         committed: 1,
+        unchanged: 0,
         skippedOwners: [],
         skippedRepositories: [],
         warnings: [],
@@ -578,6 +588,7 @@ test('counts complete, partial, failed, and not-run universities independently',
         university: 'Partial',
         discovered: 1,
         committed: 1,
+        unchanged: 0,
         skippedOwners: [],
         skippedRepositories: [],
         warnings: [safeWarning],
@@ -600,6 +611,7 @@ test('counts complete, partial, failed, and not-run universities independently',
             elapsedMs: 120_000,
             universitiesProcessed: 3,
             committed: 2,
+            unchanged: 0,
             failed: 1,
             interrupted: 0,
             partial: 1,
@@ -624,4 +636,54 @@ test('counts complete, partial, failed, and not-run universities independently',
         committedAssociations: 2,
         textWarnings: 1,
     });
+});
+
+test('reports unchanged repositories separately from committed associations', () => {
+    const unchanged: ScrapeUniversityResult = {
+        status: 'complete',
+        university: 'Unchanged University',
+        discovered: 5,
+        committed: 0,
+        unchanged: 5,
+        skippedOwners: [],
+        skippedRepositories: [],
+        warnings: [],
+    };
+    const report = createScrapingReport({
+        startedAt: new Date('2026-11-09T10:00:00.000Z'),
+        finishedAt: new Date('2026-11-09T10:01:00.000Z'),
+        policy: 'best-effort',
+        universityCount: 2,
+        result: {
+            elapsedMs: 0,
+            universitiesProcessed: 1,
+            committed: 0,
+            unchanged: 5,
+            failed: 0,
+            interrupted: 0,
+            partial: 0,
+            results: [unchanged],
+            failures: [],
+            outcomes: [
+                unchanged,
+                { status: 'not_run', university: 'Later University' },
+            ],
+        },
+    });
+    expect(report.schemaVersion).toBe(4);
+    expect(report.summary).toMatchObject({
+        committedAssociations: 0,
+        unchangedRepositories: 5,
+    });
+    expect(report.universities).toEqual([
+        expect.objectContaining({
+            university: 'Unchanged University',
+            committedAssociations: 0,
+            unchangedRepositories: 5,
+        }),
+        expect.objectContaining({
+            university: 'Later University',
+            unchangedRepositories: 0,
+        }),
+    ]);
 });

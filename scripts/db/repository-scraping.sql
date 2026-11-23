@@ -19,6 +19,10 @@ SELECT format(
     :'application_user'
 ) \gexec
 SELECT format(
+    'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.repository_classification_predictions TO %I',
+    :'application_user'
+) \gexec
+SELECT format(
     'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.repository_scraping_cache, public.repository_scraping_runs, public.repository_scraping_run_repositories TO %I',
     :'application_user'
 ) \gexec

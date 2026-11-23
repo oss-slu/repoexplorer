@@ -803,6 +803,58 @@ integrationDescribe('RepositoryStore PostgreSQL integration', () => {
         ]);
     });
 
+    test('omits saved ETags for rows whose eligibility flags are unknown', async () => {
+        const university = `${testPrefix}-unknown-flags`;
+        const knownId = 8_765_432_190;
+        const archivedUnknownId = 8_765_432_191;
+        const templateUnknownId = 8_765_432_192;
+        const bothUnknownId = 8_765_432_193;
+        const ids = [knownId, archivedUnknownId, templateUnknownId, bothUnknownId];
+        await store.upsertUniversity(
+            university,
+            ids.map((id) =>
+                record(university, id, { fullName: `flags-owner/repo-${id}` }),
+            ),
+        );
+        await adminPool.query(
+            `UPDATE public.repository_scraping
+             SET archived = CASE WHEN id IN ($2, $4) THEN NULL ELSE archived END,
+                 is_template = CASE WHEN id IN ($3, $4) THEN NULL ELSE is_template END
+             WHERE university = $1`,
+            [university, archivedUnknownId, templateUnknownId, bothUnknownId],
+        );
+        await adminPool.query(
+            `INSERT INTO public.repository_scraping_cache
+                (university, repository_id, etag, updated_at)
+             SELECT $1, id, '"etag-' || id || '"', now()
+             FROM unnest($2::bigint[]) AS id`,
+            [university, ids],
+        );
+
+        expect(await store.listKnownRepositories(university)).toEqual([
+            {
+                id: knownId,
+                fullName: `flags-owner/repo-${knownId}`,
+                etag: `"etag-${knownId}"`,
+            },
+            { id: archivedUnknownId, fullName: `flags-owner/repo-${archivedUnknownId}` },
+            { id: templateUnknownId, fullName: `flags-owner/repo-${templateUnknownId}` },
+            { id: bothUnknownId, fullName: `flags-owner/repo-${bothUnknownId}` },
+        ]);
+
+        // A refetch writes the flags back, after which the saved ETag is used again.
+        await store.upsertUniversity(university, [
+            record(university, bothUnknownId, {
+                fullName: `flags-owner/repo-${bothUnknownId}`,
+            }),
+        ]);
+        expect(await store.listKnownRepositories(university)).toContainEqual({
+            id: bothUnknownId,
+            fullName: `flags-owner/repo-${bothUnknownId}`,
+            etag: `"etag-${bothUnknownId}"`,
+        });
+    });
+
     test('reproduces PostgreSQL NUL rejection and persists the normalized value', async () => {
         const university = `${testPrefix}-nul`;
         const rawRecord = record(university, 8_765_432_120, {
@@ -999,6 +1051,8 @@ function record(
         htmlUrl: 'https://github.com/owner/repository',
         description: null,
         fork: 0,
+        archived: false,
+        isTemplate: false,
         createdAt: '2020-01-01T00:00:00.000Z',
         updatedAt: '2020-01-02T00:00:00.000Z',
         pushedAt: null,

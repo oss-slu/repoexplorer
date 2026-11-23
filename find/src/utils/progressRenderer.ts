@@ -23,6 +23,7 @@ type PhaseProgress = {
     completed?: number;
     total?: number;
     skipped?: number;
+    unchanged?: number;
     warnings?: number;
     label?: string;
 };
@@ -97,6 +98,7 @@ export class CliProgressRenderer {
                 completed: event.completed,
                 total: event.total,
                 skipped: event.skipped,
+                unchanged: event.unchanged,
                 warnings: event.warnings,
                 label: event.label,
             };
@@ -154,6 +156,9 @@ export class CliProgressRenderer {
             ? ` (${sanitize(this.current.label)})`
             : '';
         const recovery = [
+            this.current.unchanged
+                ? `${this.current.unchanged} unchanged`
+                : undefined,
             this.current.skipped ? `${this.current.skipped} skipped` : undefined,
             this.current.warnings
                 ? `${this.current.warnings} text warnings`

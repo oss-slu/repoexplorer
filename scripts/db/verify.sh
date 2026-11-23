@@ -73,6 +73,10 @@ STACK_STARTED=1
 compose up --build --detach --wait --wait-timeout 120 db
 
 compose exec --no-TTY db sh -eu -c \
+    'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$PGDATABASE" -v ON_ERROR_STOP=1' \
+    <"${PROJECT_ROOT}/scripts/db/verify-classification-migration.sql"
+
+compose exec --no-TTY db sh -eu -c \
     'PGPASSWORD="$PGPASSWORD" psql -h 127.0.0.1 -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1' \
     <"${PROJECT_ROOT}/scripts/db/verify.sql"
 

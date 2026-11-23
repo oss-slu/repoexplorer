@@ -53,9 +53,19 @@ BEGIN
                     'contributors', 'contributor_count', 'bus_factor', 'code_of_conduct_file',
                     'contributing', 'security_policy', 'issue_templates', 'pull_request_template',
                     'subscribers_count', 'affiliation_prediction_gpt5_mini',
-                    'type_prediction_gpt5_mini', 'scraped_at'
+                    'type_prediction_gpt5_mini', 'scraped_at', 'archived', 'is_template'
                 ]::TEXT[],
                 ARRAY['id', 'university']::TEXT[]
+            ),
+            (
+                'repository_classification_predictions',
+                ARRAY[
+                    'id', 'university', 'task', 'provider', 'model', 'prompt_version',
+                    'threshold', 'input_hash', 'score', 'category', 'affiliation_decision',
+                    'affiliation_relationship', 'affiliation_evidence', 'explanation', 'status', 'simulated',
+                    'error_message', 'classified_at'
+                ]::TEXT[],
+                ARRAY['id', 'university', 'task', 'provider', 'model', 'prompt_version', 'threshold', 'input_hash']::TEXT[]
             ),
             (
                 'repository_scraping_cache',
@@ -143,6 +153,10 @@ BEGIN
         OR NOT has_table_privilege(current_user, 'public.repository_scraping', 'INSERT')
         OR NOT has_table_privilege(current_user, 'public.repository_scraping', 'UPDATE')
         OR NOT has_table_privilege(current_user, 'public.repository_scraping', 'DELETE')
+        OR NOT has_table_privilege(current_user, 'public.repository_classification_predictions', 'SELECT')
+        OR NOT has_table_privilege(current_user, 'public.repository_classification_predictions', 'INSERT')
+        OR NOT has_table_privilege(current_user, 'public.repository_classification_predictions', 'UPDATE')
+        OR NOT has_table_privilege(current_user, 'public.repository_classification_predictions', 'DELETE')
         OR NOT has_table_privilege(current_user, 'public.repository_scraping_cache', 'SELECT')
         OR NOT has_table_privilege(current_user, 'public.repository_scraping_cache', 'INSERT')
         OR NOT has_table_privilege(current_user, 'public.repository_scraping_cache', 'UPDATE')
@@ -243,6 +257,27 @@ VALUES (
     0, 0, 0, '[]', 0, 0, '2026-10-20 12:00:00+00'
 );
 
+INSERT INTO public.repository_scraping_cache (
+    university, repository_id, etag
+)
+VALUES ('Issue 83 Verify', 9876543210457, '"verify-etag"');
+
+INSERT INTO public.repository_scraping_runs (
+    run_id, university, mode, status, candidate_count
+)
+VALUES ('issue83-verify-run', 'Issue 83 Verify', 'full', 'ready', 1);
+
+INSERT INTO public.repository_scraping_run_repositories (
+    run_id, university, repository_id, candidate, status
+)
+VALUES (
+    'issue83-verify-run',
+    'Issue 83 Verify',
+    9876543210457,
+    '{"id":9876543210457,"fullName":"verify-owner/repo"}'::JSONB,
+    'pending'
+);
+
 DO $$
 BEGIN
     IF (
@@ -299,6 +334,31 @@ BEGIN
         RAISE EXCEPTION 'Repository scraping row did not preserve nullable downstream fields';
     END IF;
 
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.repository_scraping_cache
+        WHERE university = 'Issue 83 Verify'
+            AND repository_id = 9876543210457
+            AND etag = '"verify-etag"'
+    ) OR NOT EXISTS (
+        SELECT 1
+        FROM public.repository_scraping_runs
+        WHERE run_id = 'issue83-verify-run'
+            AND university = 'Issue 83 Verify'
+            AND status = 'ready'
+            AND candidate_count = 1
+    ) OR NOT EXISTS (
+        SELECT 1
+        FROM public.repository_scraping_run_repositories
+        WHERE run_id = 'issue83-verify-run'
+            AND university = 'Issue 83 Verify'
+            AND repository_id = 9876543210457
+            AND status = 'pending'
+            AND candidate->>'fullName' = 'verify-owner/repo'
+    ) THEN
+        RAISE EXCEPTION 'Repository scraping checkpoints did not round-trip';
+    END IF;
+
     BEGIN
         INSERT INTO public.repositories (
             university, id, owner, fork, size, stargazers_count, watchers_count, forks_count,
@@ -333,5 +393,15 @@ WHERE university = 'Issue 58 Verify'
 DELETE FROM public.repository_scraping
 WHERE university = 'Issue 58 Verify'
     AND id = 9876543210456;
+
+UPDATE public.repository_scraping_run_repositories
+SET status = 'complete', record = '{}'::JSONB
+WHERE run_id = 'issue83-verify-run'
+    AND university = 'Issue 83 Verify'
+    AND repository_id = 9876543210457;
+
+DELETE FROM public.repository_scraping_cache
+WHERE university = 'Issue 83 Verify'
+    AND repository_id = 9876543210457;
 
 ROLLBACK;

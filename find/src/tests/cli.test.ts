@@ -33,6 +33,7 @@ const partialResult: ScrapingRunResult = {
     elapsedMs: 1_200,
     universitiesProcessed: 1,
     committed: 3,
+    unchanged: 0,
     failed: 0,
     interrupted: 0,
     partial: 1,
@@ -42,6 +43,7 @@ const partialResult: ScrapingRunResult = {
             university: 'Saint Louis University',
             discovered: 3,
             committed: 3,
+            unchanged: 0,
             skippedOwners: [skippedOwner],
             skippedRepositories: [],
             warnings: [],
@@ -54,6 +56,7 @@ const partialResult: ScrapingRunResult = {
             university: 'Saint Louis University',
             discovered: 3,
             committed: 3,
+            unchanged: 0,
             skippedOwners: [skippedOwner],
             skippedRepositories: [],
             warnings: [],
@@ -66,6 +69,7 @@ function emptyResult(): ScrapingRunResult {
         elapsedMs: 0,
         universitiesProcessed: 1,
         committed: 0,
+        unchanged: 0,
         failed: 0,
         interrupted: 0,
         partial: 0,
@@ -75,6 +79,7 @@ function emptyResult(): ScrapingRunResult {
                 university: 'Complete University',
                 discovered: 0,
                 committed: 0,
+                unchanged: 0,
                 skippedOwners: [],
                 skippedRepositories: [],
                 warnings: [],
@@ -87,6 +92,7 @@ function emptyResult(): ScrapingRunResult {
                 university: 'Complete University',
                 discovered: 0,
                 committed: 0,
+                unchanged: 0,
                 skippedOwners: [],
                 skippedRepositories: [],
                 warnings: [],
@@ -846,7 +852,7 @@ test.each([
                 'utf8',
             );
             expect(JSON.parse(contents)).toMatchObject({
-                schemaVersion: 3,
+                schemaVersion: 4,
                 summary: {
                     universitiesConfigured: 1,
                     interruptedUniversities: 1,
@@ -922,19 +928,51 @@ test('prints an explicit partial-success summary with skipped owners and report 
     expect(summary).toContain('partial: 1');
     expect(summary).toContain('skipped owners: 1');
     expect(summary).toContain('repository associations committed: 3');
+    expect(summary).toContain('repositories unchanged: 0');
     expect(summary).toContain('report: /tmp/scrape-report.json');
     expect(summary).not.toContain('missing repositories');
+});
+
+test('reports unchanged repositories when nothing was rewritten', () => {
+    const allUnchanged: ScrapingRunResult = {
+        ...partialResult,
+        committed: 0,
+        unchanged: 75,
+        partial: 0,
+        results: [
+            {
+                ...partialResult.results[0]!,
+                status: 'complete',
+                discovered: 75,
+                committed: 0,
+                unchanged: 75,
+                skippedOwners: [],
+            },
+        ],
+    };
+    const summary = formatCliSummary(
+        allUnchanged,
+        1,
+        'best-effort',
+        '/tmp/scrape-report.json',
+        false,
+    );
+    expect(summary).toContain('COMPLETED');
+    expect(summary).toContain('repository associations committed: 0');
+    expect(summary).toContain('repositories unchanged: 75');
 });
 
 test('labels a zero-row partial run and a mixed partial/fatal run clearly', () => {
     const zeroRowPartial: ScrapingRunResult = {
         ...partialResult,
         committed: 0,
+        unchanged: 0,
         results: [
             {
                 ...partialResult.results[0],
                 discovered: 0,
                 committed: 0,
+                unchanged: 0,
             },
         ],
         outcomes: [
@@ -943,6 +981,7 @@ test('labels a zero-row partial run and a mixed partial/fatal run clearly', () =
                 university: 'Saint Louis University',
                 discovered: 0,
                 committed: 0,
+                unchanged: 0,
                 skippedOwners: [skippedOwner],
                 skippedRepositories: [],
                 warnings: [],

@@ -93,6 +93,8 @@ function record(
         htmlUrl: null,
         description: null,
         fork: 0,
+        archived: false,
+        isTemplate: false,
         createdAt: null,
         updatedAt: null,
         pushedAt: null,

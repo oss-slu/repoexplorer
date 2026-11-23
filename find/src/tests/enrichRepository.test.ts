@@ -55,6 +55,8 @@ function repository(overrides: Record<string, unknown> = {}) {
         html_url: 'https://github.com/slu/project',
         description: 'A repository',
         fork: false,
+        archived: false,
+        is_template: false,
         created_at: '2020-01-02T03:04:05-05:00',
         updated_at: '2024-05-06T07:08:09Z',
         pushed_at: '2024-05-06T07:08:09Z',
@@ -358,6 +360,29 @@ describe('enrichRepository', () => {
         expect(result.contributorCount).toBe(0);
     });
 
+    test('stores archived and template flags for later eligibility checks', async () => {
+        const result = await enrichRepository(
+            commonHandler({
+                repository: repository({ archived: true, is_template: true }),
+            }),
+            candidate,
+            university,
+        );
+        expect(result).toMatchObject({ archived: true, isTemplate: true });
+    });
+
+    test('keeps eligibility flags unknown when GitHub omits them', async () => {
+        const repositoryWithoutFlags: Record<string, unknown> = repository();
+        delete repositoryWithoutFlags.archived;
+        delete repositoryWithoutFlags.is_template;
+        const result = await enrichRepository(
+            commonHandler({ repository: repositoryWithoutFlags }),
+            candidate,
+            university,
+        );
+        expect(result).toMatchObject({ archived: null, isTemplate: null });
+    });
+
     test('normalizes timestamps, zero-valued counts, release assets, contributors, and community file contents', async () => {
         const client = commonHandler({
             readmeStatus: 404,
@@ -401,6 +426,8 @@ describe('enrichRepository', () => {
             owner: 'slu',
             license: 'mit',
             fork: 0,
+            archived: false,
+            isTemplate: false,
             createdAt: '2020-01-02T08:04:05.000Z',
             updatedAt: '2024-05-06T07:08:09.000Z',
             pushedAt: '2024-05-06T07:08:09.000Z',

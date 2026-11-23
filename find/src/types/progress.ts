@@ -24,6 +24,7 @@ export type ScrapingProgressEvent =
           completed: number;
           total: number;
           skipped?: number;
+          unchanged?: number;
           warnings?: number;
           label?: string;
           elapsedMs: number;

@@ -54,6 +54,8 @@ export const REQUIRED_REPOSITORY_SCRAPING_COLUMNS = [
     'affiliation_prediction_gpt5_mini',
     'type_prediction_gpt5_mini',
     'scraped_at',
+    'archived',
+    'is_template',
 ] as const;
 
 const INSERT_COLUMNS = REQUIRED_REPOSITORY_SCRAPING_COLUMNS;
@@ -308,8 +310,16 @@ export class RepositoryStore implements RepositoryCollectionStorePort {
             contributors: string | null;
             contributors_etag: string | null;
         }>(
+            // Rows missing eligibility flags (migrated before they existed)
+            // get no ETag, so the next run refetches and fills them instead of
+            // receiving 304 Not Modified indefinitely.
             `SELECT repository.id::text, repository.full_name, repository.html_url,
-                    cache.etag, repository.contributors, cache.contributors_etag
+                    CASE
+                        WHEN repository.archived IS NULL OR repository.is_template IS NULL
+                            THEN NULL
+                        ELSE cache.etag
+                    END AS etag,
+                    repository.contributors, cache.contributors_etag
              FROM public.repository_scraping AS repository
              LEFT JOIN public.repository_scraping_cache AS cache
                ON cache.university = repository.university
@@ -817,6 +827,8 @@ function toDatabaseValues(record: RepositoryScrapingRecord): unknown[] {
         record.affiliationPredictionGpt5Mini,
         record.typePredictionGpt5Mini,
         record.scrapedAt,
+        record.archived,
+        record.isTemplate,
     ];
 }
 
@@ -909,6 +921,14 @@ function validateRecord(record: RepositoryScrapingRecord): void {
             repositoryName,
             'fork',
             'fork must be represented as integer 0 or 1',
+        );
+    }
+    if (
+        (record.archived !== null && typeof record.archived !== 'boolean') ||
+        (record.isTemplate !== null && typeof record.isTemplate !== 'boolean')
+    ) {
+        throw new TypeError(
+            'Repository archived and template flags must be booleans or null',
         );
     }
     for (const [name, value] of [

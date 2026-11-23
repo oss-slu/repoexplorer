@@ -4,10 +4,12 @@
     "version": "0.0.0",
     "type": "module",
     "scripts": {
-        "build": "tsup src/scraping.ts src/cli.ts --format esm --target node20 --out-dir dist",
+        "build": "tsup src/scraping.ts src/cli.ts src/classify-cli.ts src/evaluate-classification-cli.ts --format esm --target node20 --out-dir dist",
         "start": "node dist/cli.js",
+        "classify": "node dist/classify-cli.js",
+        "evaluate:classification": "node dist/evaluate-classification-cli.js",
         "test": "node --experimental-vm-modules node_modules/.bin/jest",
-        "test:integration": "node scripts/require-integration-db.mjs && node --experimental-vm-modules node_modules/.bin/jest --runInBand --runTestsByPath src/tests/repositoryStore.integration.test.ts",
+        "test:integration": "node scripts/require-integration-db.mjs && node --experimental-vm-modules node_modules/.bin/jest --runInBand --runTestsByPath src/tests/repositoryStore.integration.test.ts src/tests/classificationStore.integration.test.ts",
         "lint": "eslint .",
         "typecheck": "tsc --noEmit",
         "fmt": "prettier --write **/*.{ts,js,json}"

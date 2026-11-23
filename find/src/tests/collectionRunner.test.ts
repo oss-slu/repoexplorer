@@ -931,15 +931,21 @@ test('refresh sends the saved ETag and publishes no data when GitHub returns 304
         throw new Error(`Unexpected request: ${url}`);
     });
 
+    const progress: Array<{ unchanged?: number }> = [];
     const result = await runCollection(configuration, {
         client,
         store,
         mode: 'refresh',
         runId: 'refresh-201',
+        onProgress: (event) => {
+            if (event.type === 'progress') progress.push(event);
+        },
     });
 
     expect(requests).toEqual([{ path: '/repos/slu/known', etag: '"cached"' }]);
-    expect(result).toMatchObject({ failed: 0, committed: 0 });
+    expect(result).toMatchObject({ failed: 0, committed: 0, unchanged: 1 });
+    expect(result.results[0]).toMatchObject({ committed: 0, unchanged: 1 });
+    expect(progress.at(-1)?.unchanged).toBe(1);
     expect(store.runs.get('refresh-201:refresh')?.status).toBe('complete');
 });
 
@@ -1046,7 +1052,7 @@ test('full discovery sends saved ETags and skips enrichment for unchanged reposi
         searchRetrySleep: async () => {},
     });
 
-    expect(result).toMatchObject({ failed: 0, committed: 0 });
+    expect(result).toMatchObject({ failed: 0, committed: 0, unchanged: 1 });
     expect(
         requests.filter(({ path }) => path.startsWith('/repos/')),
     ).toEqual([{ path: '/repos/slu/one', etag: '"etag-101"' }]);

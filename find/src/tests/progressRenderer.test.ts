@@ -112,3 +112,26 @@ test('prints concise structured search retry progress to redirected output', () 
     );
     expect(sink.chunks.join('')).not.toContain('\u001b');
 });
+
+test('shows the unchanged count alongside skipped repositories', () => {
+    const sink = output(true, 200);
+    const renderer = new CliProgressRenderer({
+        stdout: sink.stream,
+        now: () => 1_000,
+        refreshMs: 250,
+    });
+    renderer.start();
+    renderer.onProgress({
+        type: 'progress',
+        phase: 'enrichment',
+        university: 'SLU',
+        completed: 10,
+        total: 12,
+        skipped: 1,
+        unchanged: 8,
+        label: 'slu/known (unchanged)',
+        elapsedMs: 1_000,
+    });
+    expect(sink.chunks.at(-1)).toContain('8 unchanged, 1 skipped');
+    renderer.finish();
+});

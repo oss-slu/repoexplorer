@@ -1,4 +1,9 @@
-import { validateScrapingConfiguration } from '../config';
+import { readFile } from 'node:fs/promises';
+import {
+    loadScrapingConfiguration,
+    validateClassificationConfiguration,
+    validateScrapingConfiguration,
+} from '../config';
 import { parseCliArguments, parseCliOptions, runCli } from '../cli';
 import { getDatabasePoolConfig } from '../db/connect';
 
@@ -131,6 +136,127 @@ describe('scraping configuration', () => {
         ).toThrow(/repositories must not contain an actual NUL/);
     });
 
+    test('validates classifier provider, threshold, retries, and truncation settings', () => {
+        expect(
+            validateScrapingConfiguration({
+                universities: [
+                    {
+                        key: 'A',
+                        fullName: 'Alpha University',
+                        acronym: 'AU',
+                        emailDomains: ['alpha.edu'],
+                        additionalQueries: ['Alpha'],
+                    },
+                ],
+            }),
+        ).toMatchObject({
+            universities: [
+                { emailDomains: ['alpha.edu'], additionalQueries: ['Alpha'] },
+            ],
+            classification: {
+                threshold: 0.4,
+                model: 'gpt-5-mini',
+                promptVersion: 'v3',
+                generation: {
+                    responseFormat: 'text',
+                    maxOutputTokens: 8192,
+                    maxOutputTokensField: 'max_completion_tokens',
+                },
+            },
+        });
+        expect(() =>
+            validateClassificationConfiguration({ threshold: 1.1 }),
+        ).toThrow(/threshold/);
+        expect(() =>
+            validateClassificationConfiguration({ apiKeyEnv: 'bad-name' }),
+        ).toThrow(/environment variable/);
+        expect(() =>
+            validateClassificationConfiguration({
+                truncation: {
+                    mode: 'start_end',
+                    maxChars: 10,
+                    startChars: 9,
+                    endChars: 2,
+                },
+            }),
+        ).toThrow(/must not exceed/);
+    });
+
+    test('validates bounded classification generation settings and safe seeds', () => {
+        expect(
+            validateClassificationConfiguration({
+                generation: {
+                    responseFormat: 'json_schema',
+                    temperature: 2,
+                    maxOutputTokens: 32768,
+                    maxOutputTokensField: 'max_completion_tokens',
+                    reasoningEffort: 'low',
+                    seed: 2147483647,
+                },
+            }).generation,
+        ).toEqual({
+            responseFormat: 'json_schema',
+            temperature: 2,
+            maxOutputTokens: 32768,
+            maxOutputTokensField: 'max_completion_tokens',
+            reasoningEffort: 'low',
+            seed: 2147483647,
+        });
+        const omitted = validateClassificationConfiguration({
+            generation: { responseFormat: 'text' },
+        }).generation;
+        expect(omitted).not.toHaveProperty('temperature');
+        expect(omitted).not.toHaveProperty('reasoningEffort');
+        expect(omitted.maxOutputTokens).toBe(8192);
+        for (const reasoningEffort of ['extreme', '', 1]) {
+            expect(() =>
+                validateClassificationConfiguration({
+                    generation: { reasoningEffort },
+                }),
+            ).toThrow(/reasoningEffort/);
+        }
+        for (const temperature of [-0.01, 2.01, Number.NaN]) {
+            expect(() =>
+                validateClassificationConfiguration({
+                    generation: { temperature },
+                }),
+            ).toThrow(/temperature/);
+        }
+        for (const maxOutputTokens of [0, 32769, 1.5]) {
+            expect(() =>
+                validateClassificationConfiguration({
+                    generation: { maxOutputTokens },
+                }),
+            ).toThrow(/maxOutputTokens/);
+        }
+        for (const seed of [-1, 2147483648, 1.5, Number.NaN]) {
+            expect(() =>
+                validateClassificationConfiguration({
+                    generation: { seed },
+                }),
+            ).toThrow(/seed/);
+        }
+        expect(() =>
+            validateClassificationConfiguration({
+                generation: { responseFormat: 'xml' },
+            }),
+        ).toThrow(/responseFormat/);
+    });
+
+    test('defaults to exact citations and validates the evidence reference wire mode', () => {
+        expect(validateClassificationConfiguration({}).citationMode).toBe(
+            'exact_quote',
+        );
+        expect(
+            validateClassificationConfiguration({
+                citationMode: 'evidence_id',
+            }).citationMode,
+        ).toBe('evidence_id');
+        expect(() =>
+            validateClassificationConfiguration({ citationMode: 'fuzzy' }),
+        ).toThrow(/citationMode/);
+    });
+
     test('uses the documented host defaults and rejects invalid configuration before database setup', async () => {
         expect(
             getDatabasePoolConfig({
@@ -142,5 +268,27 @@ describe('scraping configuration', () => {
         await expect(runCli(['--config', 'package.json'])).rejects.toThrow(
             /universities array/,
         );
+    });
+
+    test('example configurations keep temperature only where the provider accepts it', async () => {
+        const openai = await loadScrapingConfiguration(
+            'config/universities.example.json',
+        );
+        expect(openai.classification?.model).toBe('gpt-5-mini');
+        expect(openai.classification?.generation).not.toHaveProperty(
+            'temperature',
+        );
+        expect(
+            openai.classification?.generation.maxOutputTokens,
+        ).toBeGreaterThanOrEqual(4096);
+        const ollama = validateClassificationConfiguration(
+            JSON.parse(
+                await readFile('config/evaluation.example.json', 'utf8'),
+            ) as unknown,
+        );
+        expect(ollama.generation).toMatchObject({
+            temperature: 0,
+            maxOutputTokensField: 'max_tokens',
+        });
     });
 });
