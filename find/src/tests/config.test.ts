@@ -118,7 +118,11 @@ describe('scraping configuration', () => {
         expect(() =>
             validateScrapingConfiguration({
                 universities: [
-                    { key: 'University\u0000', fullName: 'University', acronym: 'U' },
+                    {
+                        key: 'University\u0000',
+                        fullName: 'University',
+                        acronym: 'U',
+                    },
                 ],
             }),
         ).toThrow(/key must not contain an actual NUL/);
@@ -272,7 +276,7 @@ describe('scraping configuration', () => {
 
     test('example configurations keep temperature only where the provider accepts it', async () => {
         const openai = await loadScrapingConfiguration(
-            'config/universities.example.json',
+            'config/universities.openai.example.json',
         );
         expect(openai.classification?.model).toBe('gpt-5-mini');
         expect(openai.classification?.generation).not.toHaveProperty(
@@ -289,6 +293,49 @@ describe('scraping configuration', () => {
         expect(ollama.generation).toMatchObject({
             temperature: 0,
             maxOutputTokensField: 'max_tokens',
+        });
+    });
+
+    test('local example configurations use the recommended Granite setup', async () => {
+        const universities = await loadScrapingConfiguration(
+            'config/universities.example.json',
+        );
+        const evaluation = validateClassificationConfiguration(
+            JSON.parse(
+                await readFile('config/evaluation.example.json', 'utf8'),
+            ) as unknown,
+        );
+        expect(universities.classification).toEqual(evaluation);
+        expect(evaluation).toMatchObject({
+            provider: 'ollama-openai-compatible',
+            baseUrl: 'http://127.0.0.1:11434/v1',
+            model: 'granite4.2-8b-12k',
+            concurrency: 1,
+            citationMode: 'evidence_id',
+            affiliationEvidenceGate: 'names_institution',
+            generation: {
+                responseFormat: 'json_schema',
+                reasoningEffort: 'none',
+            },
+        });
+        const modelfile = await readFile(
+            'config/ollama/granite4.2-8b-12k.Modelfile',
+            'utf8',
+        );
+        expect(modelfile).toMatch(/^FROM granite4\.2:8b$/m);
+        expect(modelfile).toMatch(/^PARAMETER num_ctx 12288$/m);
+    });
+
+    test('universities example and OpenAI variant differ only in classification', async () => {
+        const local = JSON.parse(
+            await readFile('config/universities.example.json', 'utf8'),
+        ) as Record<string, unknown>;
+        const openai = JSON.parse(
+            await readFile('config/universities.openai.example.json', 'utf8'),
+        ) as Record<string, unknown>;
+        expect({ ...local, classification: null }).toEqual({
+            ...openai,
+            classification: null,
         });
     });
 });

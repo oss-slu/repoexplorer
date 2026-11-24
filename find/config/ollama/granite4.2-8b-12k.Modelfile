@@ -1,0 +1,10 @@
+# Recommended local classifier model: IBM Granite 4.2 8B with a 12k context.
+# Ollama loads GGUF models with a 4096-token context by default, which silently
+# cuts off classification prompts (READMEs plus the evidence catalog).
+#
+#   ollama pull granite4.2:8b
+#   ollama create granite4.2-8b-12k -f config/ollama/granite4.2-8b-12k.Modelfile
+#
+# The derived model shares the base model's weights; no extra download.
+FROM granite4.2:8b
+PARAMETER num_ctx 12288
