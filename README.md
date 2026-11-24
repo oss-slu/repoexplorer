@@ -77,12 +77,15 @@ The application uses interactive charts, tables, and summary cards to present co
 
 - TypeScript
 - PostgreSQL
-- GitHub APIs
-- Local LLMs (under development)
+- GitHub REST and GraphQL APIs
 
 The data collection component is a rebuild of the original [RepoFinder](https://github.com/UC-OSPO-Network/repofinder) project developed by the UC OSPO Network.
 
-RepoFinder supports repository discovery, data collection, and enrichment. For more information, see the [RepoFinder Documentation](find/README.md).
+RepoFinder supports repository discovery, data collection, and enrichment based on university-specific configurations. It also includes a refresh mode that updates previously collected repository data with new information from GitHub.
+
+A separate classifier workflow uses AI models to predict university affiliations and project types for stored repositories. Support for local AI models is currently under development.
+
+For more information, see the [RepoFinder Documentation](find/README.md).
 
 ### Infrastructure
 

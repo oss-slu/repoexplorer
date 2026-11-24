@@ -249,7 +249,7 @@ It supports the discovery, collection, and enrichment of open-source repository 
 RepoFinder supports:
 
 - Discovering potential university-affiliated open-source repositories.
-- Collecting repository information.
+- Collecting repository information based on university-specific configurations.
 - Interacting with GitHub REST and GraphQL APIs.
 - Enriching collected repository data with additional metadata.
 - Storing collection checkpoints in PostgreSQL.
@@ -257,6 +257,21 @@ RepoFinder supports:
 - Supporting scheduled and manually triggered collection workflows through GitHub Actions.
 
 Discovered repositories are considered candidates and do not necessarily have verified university affiliations.
+
+### Discovery and Refresh Modes
+
+RepoFinder supports two collection modes:
+
+- **Discovery Mode:** Uses university-specific configurations to discover repositories, collect information from GitHub, and publish the collected data to PostgreSQL.
+- **Refresh Mode:** Retrieves previously stored repositories and updates their database records with new information from GitHub.
+
+### Classifier Workflow
+
+A separate classifier workflow uses AI models to analyze stored repositories and predict their university affiliations and project types.
+
+Support for local AI models is currently under development.
+
+### Integration with RepoExplorer
 
 RepoFinder operates separately from the frontend and backend API. The dashboard API currently retrieves data through its existing JSON and PostgreSQL data sources rather than directly from the RepoFinder staging table.
 
@@ -268,10 +283,20 @@ The following sections describe the high-level flow of data through RepoExplorer
 
 ### Data Collection
 
-1. RepoFinder discovers potential university-affiliated repositories based on university configurations.
-2. Repository information is collected and enriched using GitHub APIs.
-3. Collection checkpoints are stored in PostgreSQL.
-4. Completed university collection runs are published to the `public.repository_scraping` staging table.
+1. University-specific configurations determine which universities RepoFinder collects data for.
+2. RepoFinder discovers potential university-affiliated repositories.
+3. Repository information is collected and enriched using GitHub APIs.
+4. Collection checkpoints are stored in PostgreSQL.
+5. Completed university collection runs are published to the `public.repository_scraping` staging table.
+6. Refresh mode allows previously stored repository data to be updated with new information from GitHub.
+
+### Data Classification
+
+1. The separate classifier workflow retrieves stored repository data.
+2. AI models analyze the repository information.
+3. The classifier predicts university affiliations and project types.
+
+Support for local AI models is currently under development.
 
 ### Data Retrieval
 
@@ -289,7 +314,7 @@ The following sections describe the high-level flow of data through RepoExplorer
 3. Users can interact with supported filters and dashboard controls.
 4. Updated requests allow the frontend to display data based on user-selected criteria.
 
-The RepoFinder data collection workflow and dashboard request workflow currently operate as separate processes within the overall system.
+The RepoFinder data collection and classification workflows operate separately from the dashboard request workflow.
 
 ## 11. Infrastructure and Deployment
 
