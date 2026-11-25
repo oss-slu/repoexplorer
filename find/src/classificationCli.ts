@@ -199,6 +199,7 @@ export function formatClassificationSummary(
             scoreRetriesRecovered:
                 sum.scoreRetriesRecovered + university.scoreRetriesRecovered,
             downgraded: sum.downgraded + university.downgraded,
+            prefiltered: sum.prefiltered + university.prefiltered,
         }),
         {
             candidates: 0,
@@ -216,6 +217,7 @@ export function formatClassificationSummary(
             scoreRetries: 0,
             scoreRetriesRecovered: 0,
             downgraded: 0,
+            prefiltered: 0,
         },
     );
     const state = report.interrupted
@@ -227,5 +229,5 @@ export function formatClassificationSummary(
         report.simulationSeed === undefined
             ? ''
             : `; simulation seed: ${report.simulationSeed}`;
-    return `${state} in ${(report.elapsedMs / 1000).toFixed(1)}s; candidates: ${totals.candidates}; eligible: ${totals.eligible}; ineligible: ${totals.ineligible}; affiliation supported: ${totals.affiliationPredicted}; below threshold: ${totals.belowThreshold}; not supported: ${totals.affiliationNotSupported}; uncertain: ${totals.affiliationUncertain}; downgraded: ${totals.downgraded}; project types: ${totals.projectTypesPredicted}; semantic review: ${report.semanticReviewFindings.length}; repaired citations: ${totals.citationRepairs} in ${totals.repairedResults} results; score retries: ${totals.scoreRetries} (${totals.scoreRetriesRecovered} recovered); resumed: ${totals.reused}; failed: ${totals.failed}; provider: ${report.provider}/${report.model}; simulated: ${report.simulated}${seed}; report: ${reportPath}\n`;
+    return `${state} in ${(report.elapsedMs / 1000).toFixed(1)}s; candidates: ${totals.candidates}; eligible: ${totals.eligible}; ineligible: ${totals.ineligible}; affiliation supported: ${totals.affiliationPredicted}; below threshold: ${totals.belowThreshold}; not supported: ${totals.affiliationNotSupported}; uncertain: ${totals.affiliationUncertain}; downgraded: ${totals.downgraded}; prefiltered: ${totals.prefiltered}; project types: ${totals.projectTypesPredicted}; semantic review: ${report.semanticReviewFindings.length}; repaired citations: ${totals.citationRepairs} in ${totals.repairedResults} results; score retries: ${totals.scoreRetries} (${totals.scoreRetriesRecovered} recovered); resumed: ${totals.reused}; failed: ${totals.failed}; provider: ${report.provider}/${report.model}; simulated: ${report.simulated}${seed}; report: ${reportPath}\n`;
 }

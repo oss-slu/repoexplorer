@@ -213,7 +213,11 @@ test('evaluation CLI end to end against a local OpenAI-compatible server with th
                 gatedSupported: 1,
                 downgraded: 1,
             },
-            productionPipeline: { followUpRequests: 0 },
+            // The unnamed repository is not sent to the model in production.
+            productionPipeline: {
+                followUpRequests: 0,
+                gate: { prefiltered: 1 },
+            },
         });
         const named = report.cases.find(
             (result: { caseId: string }) => result.caseId === 'named',

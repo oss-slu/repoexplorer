@@ -70,7 +70,12 @@ describe('classification runner', () => {
     });
 
     test('reuses stored predictions and reclassifies when any fingerprint input changes', async () => {
-        const store = new MemoryStore([candidate(7, university.key)]);
+        // The README names the university, so the gated runs still reach the model.
+        const store = new MemoryStore([
+            candidate(7, university.key, {
+                readme: 'Readme content. Built at Saint Louis University.',
+            }),
+        ]);
         await runClassification(
             dependencies(store, new FakeClassificationClient()),
         );
@@ -369,6 +374,9 @@ describe('classification runner', () => {
                 candidate(121, university.key, {
                     owner: 'oss-slu',
                     fullName: 'oss-slu/tool',
+                    // Named in the README, so the pre-filter sends it to the
+                    // model; the model's citations never name it.
+                    readme: 'Readme content. Built at Saint Louis University.',
                 }),
             ]);
             const original = supportedWith([
@@ -415,6 +423,34 @@ describe('classification runner', () => {
                     repository: 'oss-slu/tool',
                     original: JSON.parse(original),
                 },
+            ]);
+        });
+
+        test('does not send a repository whose visible text never names the university', async () => {
+            const store = new MemoryStore([candidate(125, university.key)]);
+            const client = new FakeClassificationClient();
+            const report = await runClassification(
+                dependencies(store, client, gatedConfiguration),
+            );
+            expect(client.requests).toEqual([]);
+            expect(report.universities[0]).toMatchObject({
+                eligible: 1,
+                prefiltered: 1,
+                affiliationUncertain: 1,
+            });
+            expect(store.predictionsFor('affiliation')[0]).toMatchObject({
+                status: 'uncertain',
+                affiliationDecision: 'uncertain',
+                affiliationRelationship: 'insufficient_evidence',
+                score: null,
+                affiliationEvidence: [],
+                explanation: expect.stringMatching(/^Not sent to the model/),
+            });
+            // With the gate off the model decides, so nothing is prefiltered.
+            const ungated = new FakeClassificationClient();
+            await runClassification(dependencies(store, ungated));
+            expect(ungated.requests.map((request) => request.task)).toEqual([
+                'affiliation',
             ]);
         });
 

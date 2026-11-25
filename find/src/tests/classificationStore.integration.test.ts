@@ -8,7 +8,10 @@ import { ClassificationStore } from '../classification/store';
 import { FakeClassificationClient } from '../classification/client';
 import { runClassification } from '../classification/runner';
 import { RepositoryStore } from '../db/repositoryStore';
-import type { RepositoryScrapingRecord } from '../types/scraping';
+import type {
+    ClassificationPrediction,
+    RepositoryScrapingRecord,
+} from '../types/scraping';
 import { validateClassificationConfiguration } from '../config';
 import { runClassificationCli } from '../classificationCli';
 
@@ -75,7 +78,10 @@ integrationDescribe('ClassificationStore PostgreSQL integration', () => {
         const id = 8_765_432_903;
         const university = `${prefix}-gated`;
         await new RepositoryStore(pool).upsertUniversity(university, [
-            record(university, id),
+            {
+                ...record(university, id),
+                readme: '# Project\n\nBuilt at Test University.',
+            },
         ]);
 
         const report = await runClassification({
@@ -124,6 +130,104 @@ integrationDescribe('ClassificationStore PostgreSQL integration', () => {
                 affiliation_relationship: null,
                 citations: null,
                 downgraded: false,
+            },
+        ]);
+    });
+
+    test('latest view keeps one current answer per repository and skips failed and simulated rows', async () => {
+        const id = 8_765_432_904;
+        const university = `${prefix}-latest`;
+        await new RepositoryStore(pool).upsertUniversity(university, [
+            record(university, id),
+        ]);
+        let hash = 0;
+        const save = (
+            run: { model: string; at: string; simulated?: boolean },
+            row: Partial<ClassificationPrediction> &
+                Pick<ClassificationPrediction, 'task' | 'status'>,
+        ) =>
+            store.savePrediction({
+                id,
+                university,
+                provider: 'ollama-openai-compatible',
+                model: run.model,
+                promptVersion: 'v3',
+                threshold: 0.4,
+                inputHash: (hash += 1).toString(16).padStart(64, '0'),
+                score: null,
+                category: null,
+                affiliationDecision: null,
+                affiliationRelationship: null,
+                affiliationEvidence: null,
+                explanation: null,
+                simulated: run.simulated ?? false,
+                errorMessage: null,
+                classifiedAt: run.at,
+                ...row,
+            });
+        const older = { model: 'older-model', at: '2026-11-01T00:00:00.000Z' };
+        const newer = {
+            model: 'granite4.2-8b-12k',
+            at: '2026-11-02T00:00:00.000Z',
+        };
+        await save(older, {
+            task: 'affiliation',
+            status: 'predicted',
+            score: 0.9,
+            affiliationDecision: 'supported',
+            affiliationRelationship: 'coursework',
+            affiliationEvidence: [{ field: 'readme', quote: '# Project' }],
+        });
+        await save(older, {
+            task: 'project_type',
+            status: 'predicted',
+            category: 'EDU',
+        });
+        await save(newer, {
+            task: 'affiliation',
+            status: 'not_supported',
+            score: 0.1,
+            affiliationDecision: 'not_supported',
+            affiliationRelationship: 'incidental_mention',
+            affiliationEvidence: [],
+        });
+        await save(newer, {
+            task: 'project_type',
+            status: 'skipped_affiliation_rejected',
+        });
+        // Newer still, but a failure and a simulated run never count.
+        await save(
+            { model: 'failing-model', at: '2026-11-03T00:00:00.000Z' },
+            { task: 'affiliation', status: 'failed', errorMessage: 'timeout' },
+        );
+        await save(
+            {
+                model: 'deterministic-evidence-v2',
+                at: '2026-11-04T00:00:00.000Z',
+                simulated: true,
+            },
+            {
+                task: 'affiliation',
+                status: 'uncertain',
+                affiliationDecision: 'uncertain',
+                affiliationRelationship: 'insufficient_evidence',
+                affiliationEvidence: [],
+            },
+        );
+
+        const rows = await adminPool.query(
+            `SELECT model, affiliation_decision, affiliation_score, project_type, project_type_status
+             FROM public.repository_classification_latest
+             WHERE id = $1 AND university = $2`,
+            [id, university],
+        );
+        expect(rows.rows).toEqual([
+            {
+                model: 'granite4.2-8b-12k',
+                affiliation_decision: 'not_supported',
+                affiliation_score: 0.1,
+                project_type: null,
+                project_type_status: 'skipped_affiliation_rejected',
             },
         ]);
     });
@@ -200,6 +304,8 @@ integrationDescribe('ClassificationStore PostgreSQL integration', () => {
             expect(first.summary).toMatch(/^COMPLETED/);
             expect(first.summary).toContain('affiliation supported: 1;');
             expect(first.summary).toContain('uncertain: 1;');
+            // The other university is never named, so it is not sent to the model.
+            expect(first.summary).toContain('prefiltered: 1;');
             expect(first.summary).toContain('failed: 0;');
 
             const rows = await adminPool.query(

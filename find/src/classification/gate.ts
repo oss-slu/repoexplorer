@@ -2,12 +2,53 @@ import type { AffiliationEvidenceGate } from '../types/scraping';
 import type { AffiliationResponse } from './contracts';
 import {
     citationNamesInstitution,
+    quoteNamesInstitution,
     type InstitutionMatchContext,
     type InstitutionNames,
 } from './review';
 
 /** Recorded in the input fingerprint; change it when the gate's rule changes. */
 export const AFFILIATION_GATE_VERSION = 'names-institution-v4';
+
+/** Recorded in the input fingerprint; change it when the pre-filter changes. */
+export const AFFILIATION_PREFILTER_VERSION = 'visible-text-v1';
+
+/** Fields a gate-accepted citation can come from (owner and fullName never count). */
+const NAMING_FIELDS = ['description', 'readme', 'homepage'] as const;
+
+/**
+ * True when some text the model is shown (the description, the visible README
+ * excerpt, or the homepage) names the institution under the gate's rule. When
+ * it is false, no citation can pass the gate, so the classifier skips the
+ * model and stores prefilteredAffiliation() instead. This replaces upstream
+ * repofinder's keyword score, limited to the fields this finder collects.
+ */
+export function visibleTextNamesInstitution(
+    segments: Partial<Record<string, readonly string[]>>,
+    institution: InstitutionNames,
+    context: InstitutionMatchContext,
+): boolean {
+    return NAMING_FIELDS.some((field) =>
+        (segments[field] ?? []).some((segment) =>
+            quoteNamesInstitution(segment, institution, context, {
+                homepage: field === 'homepage',
+            }),
+        ),
+    );
+}
+
+/** The stored result for a repository the pre-filter keeps from the model. */
+export function prefilteredAffiliation(
+    institution: InstitutionNames,
+): AffiliationResponse {
+    return {
+        decision: 'uncertain',
+        relationship: 'insufficient_evidence',
+        score: null,
+        evidence: [],
+        explanation: `Not sent to the model (pre-filter ${AFFILIATION_PREFILTER_VERSION}): no visible description, README, or homepage text names ${institution.fullName} under the evidence gate's rule (${AFFILIATION_GATE_VERSION}), so a supported answer could not be kept.`,
+    };
+}
 
 export type AffiliationGateOutcome = {
     response: AffiliationResponse;
@@ -49,8 +90,8 @@ export function applyAffiliationEvidenceGate(
 }
 
 /**
- * Fingerprint policy: the gate version and every name the gate matches on, so
- * editing a university's names reclassifies its rows. `off` keeps the
+ * Fingerprint policy: the gate and pre-filter versions and every name they
+ * match on, so editing a university's names reclassifies its rows. `off` keeps the
  * pre-gate key so older ungated rows stay reusable.
  */
 export function affiliationGatePolicy(
@@ -64,6 +105,7 @@ export function affiliationGatePolicy(
             .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     return {
         affiliationEvidenceGate: AFFILIATION_GATE_VERSION,
+        affiliationPrefilter: AFFILIATION_PREFILTER_VERSION,
         institutionNames: {
             fullName: institution.fullName.trim(),
             acronym: institution.acronym.trim(),

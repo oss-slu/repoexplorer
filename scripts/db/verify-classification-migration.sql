@@ -11,6 +11,8 @@ VALUES
     ('Issue 86 Migration Verify', 9876543210770, 'verify-owner', 0, 0, 0, 0, 0, 0, 0, 0, '[]', 0, 0, now()),
     ('Issue 86 Migration Verify', 9876543210771, 'verify-owner', 0, 0, 0, 0, 0, 0, 0, 0, '[]', 0, 0, now());
 
+-- The latest-result view depends on the table; the migration recreates it.
+DROP VIEW public.repository_classification_latest;
 DROP TABLE public.repository_classification_predictions;
 
 -- Recreate the pre-contract shape with an existing result to exercise the

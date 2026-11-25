@@ -154,3 +154,47 @@ CREATE INDEX IF NOT EXISTS repository_classification_predictions_resume_idx
 
 COMMENT ON TABLE public.repository_classification_predictions IS
     'Model-neutral, resumable classification outcomes linked to retained scraped candidates.';
+
+-- One row per repository and university: the newest affiliation result that
+-- did not fail and was produced by a real model (not --mock or --simulate),
+-- paired with the project-type row from the same model, prompt version, and
+-- threshold. Use it when a single current answer per repository is needed;
+-- the table keeps every result.
+CREATE OR REPLACE VIEW public.repository_classification_latest AS
+SELECT
+    affiliation.university,
+    affiliation.id,
+    affiliation.affiliation_decision,
+    affiliation.affiliation_relationship,
+    affiliation.score AS affiliation_score,
+    affiliation.status AS affiliation_status,
+    project_type.category AS project_type,
+    project_type.status AS project_type_status,
+    affiliation.provider,
+    affiliation.model,
+    affiliation.prompt_version,
+    affiliation.threshold,
+    affiliation.classified_at
+FROM (
+    SELECT DISTINCT ON (university, id) *
+    FROM public.repository_classification_predictions
+    WHERE task = 'affiliation' AND status <> 'failed' AND NOT simulated
+    ORDER BY university, id, classified_at DESC
+) AS affiliation
+LEFT JOIN LATERAL (
+    SELECT candidate.category, candidate.status
+    FROM public.repository_classification_predictions AS candidate
+    WHERE candidate.task = 'project_type'
+        AND candidate.university = affiliation.university
+        AND candidate.id = affiliation.id
+        AND candidate.provider = affiliation.provider
+        AND candidate.model = affiliation.model
+        AND candidate.prompt_version = affiliation.prompt_version
+        AND candidate.threshold = affiliation.threshold
+        AND candidate.status <> 'failed'
+    ORDER BY candidate.classified_at DESC
+    LIMIT 1
+) AS project_type ON TRUE;
+
+COMMENT ON VIEW public.repository_classification_latest IS
+    'Latest non-failed, non-simulated affiliation and matching project type per repository and university.';

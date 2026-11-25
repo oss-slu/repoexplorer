@@ -29,7 +29,12 @@ import {
     type CitationFailureReason,
 } from './response';
 import type { ClassificationAttemptDiagnostic } from './client';
-import { applyAffiliationEvidenceGate } from './gate';
+import { prepareRepositoryEvidence } from './evidence';
+import {
+    applyAffiliationEvidenceGate,
+    prefilteredAffiliation,
+    visibleTextNamesInstitution,
+} from './gate';
 import {
     interpretClassificationResponse,
     isMissingScore,
@@ -140,6 +145,8 @@ export type EvaluationCaseResult = {
         projectType: PipelineTaskOutcome;
         gatedAffiliationDecision: AffiliationResponse['decision'] | null;
         downgraded: boolean;
+        /** Not sent to the model by the pre-filter (see visibleTextNamesInstitution). */
+        prefiltered: boolean;
     };
     semanticReview: SemanticReviewResult;
 };
@@ -233,7 +240,12 @@ export type ClassificationEvaluationReport = {
         repairedResults: number;
         citationRepairs: number;
         scoreRetries: { attempted: number; recovered: number };
-        gate: { rawSupported: number; gatedSupported: number; downgraded: number };
+        gate: {
+            rawSupported: number;
+            gatedSupported: number;
+            downgraded: number;
+            prefiltered: number;
+        };
         affiliationMetrics: Record<string, ReturnType<typeof affiliationMetrics>>;
         projectTypeMetrics: Record<string, ReturnType<typeof projectTypeMetrics>>;
     };
@@ -293,8 +305,27 @@ export async function runClassificationEvaluation(options: {
                 evaluateTask('affiliation', testCase, options),
                 evaluateTask('project_type', testCase, options),
             ]);
+            // As in classify: with the gate on, a repository whose visible text
+            // never names the institution is not sent to the model.
+            const prefiltered =
+                options.configuration.affiliationEvidenceGate !== 'off' &&
+                !visibleTextNamesInstitution(
+                    prepareRepositoryEvidence(testCase.candidate, options.configuration)
+                        .citationSegments,
+                    testCase.institution,
+                    matchContextFor(testCase.candidate),
+                );
             const [pipelineAffiliation, pipelineProjectType] = await Promise.all([
-                productionOutcome('affiliation', testCase, options, affiliation),
+                prefiltered
+                    ? Promise.resolve<PipelineTaskOutcome>({
+                          accepted: true,
+                          response: prefilteredAffiliation(testCase.institution),
+                          citationRepairs: [],
+                          scoreRetried: false,
+                          followUpRequests: 0,
+                          failure: null,
+                      })
+                    : productionOutcome('affiliation', testCase, options, affiliation),
                 productionOutcome('project_type', testCase, options, projectType),
             ]);
             const pipelineGate = pipelineAffiliation.response
@@ -338,6 +369,7 @@ export async function runClassificationEvaluation(options: {
                     gatedAffiliationDecision:
                         pipelineGate?.response.decision ?? null,
                     downgraded: pipelineGate?.downgradedFrom != null,
+                    prefiltered,
                 },
                 semanticReview: reviewClassificationSemantics(
                     affiliation.response && 'decision' in affiliation.response
@@ -753,7 +785,7 @@ function summarizePipeline(
         );
     return {
         description:
-            "Each case's first reply with citation repair, one missing-score follow-up, and the affiliation evidence gate, as the classify command would store it. Project types are evaluated for every case, not only supported affiliations.",
+            "Each case's first reply with citation repair, one missing-score follow-up, and the affiliation evidence gate, as the classify command would store it; with the gate on, a case whose visible text never names the institution is prefiltered instead. Project types are evaluated for every case, not only supported affiliations.",
         followUpRequests: outcomes.reduce(
             (sum, outcome) => sum + outcome.followUpRequests,
             0,
@@ -791,6 +823,7 @@ function summarizePipeline(
                 (result) => result.pipeline.gatedAffiliationDecision === 'supported',
             ).length,
             downgraded: results.filter((result) => result.pipeline.downgraded).length,
+            prefiltered: results.filter((result) => result.pipeline.prefiltered).length,
         },
         affiliationMetrics: bySplit((subset) =>
             affiliationMetrics(

@@ -25,7 +25,12 @@ import {
     ClassificationValidationError,
     type CitationRepair,
 } from './response';
-import { affiliationGatePolicy, applyAffiliationEvidenceGate } from './gate';
+import {
+    affiliationGatePolicy,
+    applyAffiliationEvidenceGate,
+    prefilteredAffiliation,
+    visibleTextNamesInstitution,
+} from './gate';
 import {
     type ClassificationPredictionKey,
     type ClassificationStorePort,
@@ -66,6 +71,8 @@ export type UniversityClassificationReport = {
     scoreRetriesRecovered: number;
     /** Supported affiliations the evidence gate stored as uncertain (also counted as uncertain). */
     downgraded: number;
+    /** Eligible repositories not sent to the model (see visibleTextNamesInstitution). */
+    prefiltered: number;
 };
 
 export type ClassificationRepairRecord = {
@@ -199,6 +206,7 @@ export async function runClassification(
             scoreRetries: 0,
             scoreRetriesRecovered: 0,
             downgraded: 0,
+            prefiltered: 0,
         };
         const progress = (task: ClassificationTask) => {
             let completed = 0;
@@ -379,6 +387,16 @@ async function classifyAffiliation(
                 evidence: existing.affiliationEvidence as AffiliationResponse['evidence'],
                 explanation: existing.explanation ?? '',
             };
+        } else if (
+            dependencies.configuration.affiliationEvidenceGate !== 'off' &&
+            !visibleTextNamesInstitution(
+                prepared.evidence.citationSegments,
+                university,
+                matchContextFor(candidate),
+            )
+        ) {
+            report.prefiltered += 1;
+            response = prefilteredAffiliation(university);
         } else {
             const inference = await runClassificationInference({
                 task,
