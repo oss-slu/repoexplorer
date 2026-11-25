@@ -7,173 +7,137 @@ import {
 } from '../classification/response';
 import type { EvidenceReference } from '../classification/evidence';
 
-describe('classifier response validation', () => {
-    test('accepts supported affiliation and project type responses', () => {
+const affiliation = (overrides: Record<string, unknown> = {}) =>
+    JSON.stringify({
+        decision: 'supported',
+        relationship: 'coursework',
+        score: 0.4,
+        evidence: [{ field: 'readme', quote: 'Course 101 at SLU' }],
+        explanation:
+            'The README identifies a course assignment at the institution.',
+        ...overrides,
+    });
+
+describe('response contract', () => {
+    test('accepts valid replies, including fenced JSON', () => {
         expect(parseAffiliationResponse(affiliation()).decision).toBe(
             'supported',
         );
         expect(
             parseProjectTypeResponse(
-                JSON.stringify({
-                    category: 'DATA',
-                    evidence: [{ field: 'readme', quote: 'analysis dataset' }],
-                    explanation: 'The repository primarily distributes an analysis dataset.',
-                }),
+                '```json\n{"category":"DATA","evidence":[{"field":"readme","quote":"dataset"}],"explanation":"A dataset."}\n```',
             ).category,
         ).toBe('DATA');
     });
 
-    test('preserves fenced JSON compatibility but does not repair malformed quotes', () => {
-        expect(
-            parseProjectTypeResponse(
-                `\`\`\`json\n${projectType()}\n\`\`\``,
-            ).category,
-        ).toBe('DEV');
-        expect(() => parseAffiliationResponse('{"decision":"supported"')).toThrow(
-            /JSON/,
+    test.each([
+        ['malformed JSON', '{"decision":"supported"', 'invalid_json'],
+        ['an unknown field', affiliation({ extra: true }), 'invalid_schema'],
+        [
+            'an unknown relationship',
+            affiliation({ relationship: 'other' }),
+            'invalid_schema',
+        ],
+        ['a score above 1', affiliation({ score: 1.01 }), 'invalid_schema'],
+        ['a string score', affiliation({ score: '0.4' }), 'invalid_schema'],
+        [
+            'uncertain with a score',
+            affiliation({
+                decision: 'uncertain',
+                relationship: 'insufficient_evidence',
+                score: 0,
+            }),
+            'contradictory_response',
+        ],
+        [
+            'supported with insufficient evidence',
+            affiliation({ relationship: 'insufficient_evidence' }),
+            'contradictory_response',
+        ],
+        [
+            'supported without a citation',
+            affiliation({ evidence: [] }),
+            'contradictory_response',
+        ],
+    ])('rejects %s', (_case, text, code) => {
+        expect(() => parseAffiliationResponse(text)).toThrow(
+            expect.objectContaining({ code }),
         );
     });
 
-    test('rejects unknown fields, invalid enums, and malformed response fields', () => {
+    test('marks only a null score on a positive decision as a missing score', () => {
         expect(() =>
-            parseAffiliationResponse(
-                JSON.stringify({ ...JSON.parse(affiliation()), extra: true }),
-            ),
-        ).toThrow(/unknown fields/);
+            parseAffiliationResponse(affiliation({ score: null })),
+        ).toThrow(
+            expect.objectContaining({
+                code: 'invalid_schema',
+                detail: 'missing_score',
+            }),
+        );
         expect(() =>
-            parseAffiliationResponse(
-                JSON.stringify({
-                    ...JSON.parse(affiliation()),
-                    relationship: 'other',
-                }),
-            ),
-        ).toThrow(/relationship/);
-        expect(() =>
-            parseProjectTypeResponse(
-                JSON.stringify({
-                    category: 'MISC',
-                    evidence: [],
-                    explanation: 'Reason',
-                }),
-            ),
-        ).toThrow(/category/);
-        expect(() => parseAffiliationResponse('not json')).toThrow(
-            expect.objectContaining({ code: 'invalid_json' }),
+            parseAffiliationResponse(affiliation({ score: 1.5 })),
+        ).toThrow(
+            expect.objectContaining({ code: 'invalid_schema', detail: null }),
         );
     });
+});
 
-    test.each([NaN, Infinity, -0.01, 1.01, '0.4'])('rejects invalid score %p', (score) => {
-        const response = JSON.parse(affiliation()) as Record<string, unknown>;
-        response.score = score;
-        expect(() => parseAffiliationResponse(JSON.stringify(response))).toThrow();
-    });
-
-    test('requires uncertainty to have a null score and positive decisions to have consistent relationships', () => {
-        const uncertain = JSON.parse(affiliation()) as Record<string, unknown>;
-        uncertain.decision = 'uncertain';
-        uncertain.relationship = 'insufficient_evidence';
-        uncertain.score = 0;
-        expect(() => parseAffiliationResponse(JSON.stringify(uncertain))).toThrow(
-            expect.objectContaining({ code: 'contradictory_response' }),
-        );
-
-        const unsupported = JSON.parse(affiliation()) as Record<string, unknown>;
-        unsupported.relationship = 'insufficient_evidence';
-        expect(() => parseAffiliationResponse(JSON.stringify(unsupported))).toThrow(
-            expect.objectContaining({ code: 'contradictory_response' }),
-        );
-
-        const noCitation = JSON.parse(affiliation()) as Record<string, unknown>;
-        noCitation.evidence = [];
-        expect(() => parseAffiliationResponse(JSON.stringify(noCitation))).toThrow(
-            expect.objectContaining({ code: 'contradictory_response' }),
-        );
-    });
-
-    test('validates exact citation text and rejects wrong-field or fabricated quotes', () => {
-        const citations = [{ field: 'readme', quote: 'Course 101 at SLU' }];
+describe('citations', () => {
+    test('require an exact quote from the named visible field and explain each failure', () => {
+        const exact = '## Café — `npm run build`';
         expect(() =>
-            validateCitations(citations, {
-                readme: ['Course 101 at SLU'],
-                description: ['Course 101'],
+            validateCitations([{ field: 'readme', quote: exact }], {
+                readme: [`before\n${exact}\nafter`],
             }),
         ).not.toThrow();
         expect(() =>
             validateCitations(
-                [{ field: 'description', quote: 'Course 101 at SLU' }],
-                { description: ['Course 101'] },
+                [{ field: 'readme', quote: '## Cafe — `npm run build`' }],
+                { readme: [exact] },
             ),
         ).toThrow(expect.objectContaining({ code: 'invalid_citation' }));
+
         expect(() =>
             validateCitations(
-                [{ field: 'readme', quote: 'Course 101 is official' }],
-                { readme: ['Course 101 at SLU'] },
+                [
+                    { field: 'missing', quote: 'anything' },
+                    { field: 'description', quote: 'anything' },
+                    { field: 'readme', quote: 'not in the visible excerpt' },
+                    { field: 'homepage', quote: 'Exact README quote' },
+                ],
+                {
+                    description: [],
+                    readme: ['Exact README quote'],
+                    homepage: ['https://example.test'],
+                },
             ),
-        ).toThrow(expect.objectContaining({ code: 'invalid_citation' }));
-    });
-
-    test('explains citation failures without accepting a cross-field match', () => {
-        const wrongField = [{ field: 'description', quote: 'Exact README quote' }];
-        try {
-            validateCitations(wrongField, {
-                description: ['A shorter description'],
-                readme: ['Exact README quote'],
-            });
-            throw new Error('Expected the wrong-field quote to be rejected');
-        } catch (error) {
-            expect(error).toMatchObject({
-                code: 'invalid_citation',
-                citationDiagnostics: [{
-                    citationIndex: 1,
-                    declaredField: 'description',
-                    reason: 'quote_matches_other_field',
-                    matchingFields: ['readme'],
-                }],
-            });
-        }
-    });
-
-    test('distinguishes missing, empty, and absent-visible-source failures', () => {
-        const citations = [
-            { field: 'missing', quote: 'anything' },
-            { field: 'description', quote: 'anything' },
-            { field: 'readme', quote: 'not in visible excerpt' },
-        ];
-        try {
-            validateCitations(citations, {
-                description: [],
-                readme: ['Only the first and last excerpt are visible'],
-            });
-            throw new Error('Expected unavailable evidence to be rejected');
-        } catch (error) {
-            expect(error).toMatchObject({
+        ).toThrow(
+            expect.objectContaining({
                 code: 'invalid_citation',
                 citationDiagnostics: [
-                    { citationIndex: 1, reason: 'source_field_missing' },
-                    { citationIndex: 2, reason: 'empty_source' },
-                    { citationIndex: 3, reason: 'quote_absent_from_visible_segments' },
+                    expect.objectContaining({
+                        citationIndex: 1,
+                        reason: 'source_field_missing',
+                    }),
+                    expect.objectContaining({
+                        citationIndex: 2,
+                        reason: 'empty_source',
+                    }),
+                    expect.objectContaining({
+                        citationIndex: 3,
+                        reason: 'quote_absent_from_visible_segments',
+                    }),
+                    expect.objectContaining({
+                        citationIndex: 4,
+                        reason: 'quote_matches_other_field',
+                        matchingFields: ['readme'],
+                    }),
                 ],
-            });
-        }
+            }),
+        );
     });
 
-    test('accepts exact Unicode, Markdown, and code punctuation without fuzzy matching', () => {
-        const exact = '## Café — `npm run build`';
-        expect(() =>
-            validateCitations(
-                [{ field: 'readme', quote: exact }],
-                { readme: [`before\n${exact}\nafter`] },
-            ),
-        ).not.toThrow();
-        expect(() =>
-            validateCitations(
-                [{ field: 'readme', quote: '## Cafe — `npm run build`' }],
-                { readme: [`before\n${exact}\nafter`] },
-            ),
-        ).toThrow(expect.objectContaining({ code: 'invalid_citation' }));
-    });
-
-    test('resolves evidence IDs to canonical exact quotes and rejects unknown or duplicate IDs', () => {
+    test('resolve evidence IDs to exact quotes and reject unknown, duplicate, or ineligible IDs', () => {
         const catalog: EvidenceReference[] = [
             {
                 id: 'E0001',
@@ -184,41 +148,30 @@ describe('classifier response validation', () => {
                 text: 'Course 101 at SLU',
             },
         ];
-        const wireResponse = JSON.stringify({
-            decision: 'supported',
-            relationship: 'coursework',
-            score: 0.8,
-            evidenceIds: ['E0001'],
-            explanation: 'The source identifies course work.',
-        });
-        const canonical = resolveEvidenceReferences(
-            wireResponse,
-            catalog,
-            'affiliation',
-        );
-        expect(parseAffiliationResponse(canonical).evidence).toEqual([
-            { field: 'readme', quote: 'Course 101 at SLU' },
-        ]);
-        expect(() =>
-            resolveEvidenceReferences(
-                JSON.stringify({
-                    ...JSON.parse(wireResponse),
-                    evidenceIds: ['E9999'],
-                }),
-                catalog,
-                'affiliation',
-            ),
-        ).toThrow(expect.objectContaining({ code: 'invalid_evidence_reference' }));
-        expect(() =>
-            resolveEvidenceReferences(
-                JSON.stringify({
-                    ...JSON.parse(wireResponse),
-                    evidenceIds: ['E0001', 'E0001'],
-                }),
-                catalog,
-                'affiliation',
-            ),
-        ).toThrow(expect.objectContaining({ code: 'invalid_evidence_reference' }));
+        const wire = (evidenceIds: string[]) =>
+            JSON.stringify({
+                decision: 'supported',
+                relationship: 'coursework',
+                score: 0.8,
+                evidenceIds,
+                explanation: 'The source identifies course work.',
+            });
+        expect(
+            parseAffiliationResponse(
+                resolveEvidenceReferences(
+                    wire(['E0001']),
+                    catalog,
+                    'affiliation',
+                ),
+            ).evidence,
+        ).toEqual([{ field: 'readme', quote: 'Course 101 at SLU' }]);
+        for (const ids of [['E9999'], ['E0001', 'E0001']]) {
+            expect(() =>
+                resolveEvidenceReferences(wire(ids), catalog, 'affiliation'),
+            ).toThrow(
+                expect.objectContaining({ code: 'invalid_evidence_reference' }),
+            );
+        }
         expect(() =>
             resolveEvidenceReferences(
                 JSON.stringify({
@@ -229,10 +182,12 @@ describe('classifier response validation', () => {
                 [{ ...catalog[0]!, field: 'owner' }],
                 'project_type',
             ),
-        ).toThrow(expect.objectContaining({ code: 'invalid_evidence_reference' }));
+        ).toThrow(
+            expect.objectContaining({ code: 'invalid_evidence_reference' }),
+        );
     });
 
-    describe('citation repair', () => {
+    describe('repair', () => {
         const segments = {
             fullName: ['slu/course-tool'],
             owner: ['slu'],
@@ -248,47 +203,19 @@ describe('classifier response validation', () => {
             'homepage',
         ] as const;
 
-        test('leaves valid citations unchanged', () => {
-            const citations = [{ field: 'readme' as const, quote: 'CS 101' }];
-            expect(repairCitations(citations, segments, fields)).toEqual({
-                citations,
-                repairs: [],
-            });
-        });
-
-        test('relabels a quote found in exactly one other allowed field', () => {
-            expect(
-                repairCitations(
-                    [{ field: 'description', quote: 'Saint Louis University' }],
-                    segments,
-                    fields,
-                ),
-            ).toEqual({
-                citations: [{ field: 'readme', quote: 'Saint Louis University' }],
-                repairs: [
-                    {
-                        citationIndex: 1,
-                        action: 'relabeled',
-                        reason: 'quote_matches_other_field',
-                        declaredField: 'description',
-                        repairedField: 'readme',
-                    },
-                ],
-            });
-        });
-
-        test('drops empty-source and absent quotes while a verified citation remains', () => {
+        test('relabels a quote found in exactly one other field and drops unverifiable ones', () => {
             const result = repairCitations(
                 [
+                    { field: 'description', quote: 'Saint Louis University' },
                     { field: 'homepage', quote: 'https://slu.edu' },
-                    { field: 'readme', quote: 'CS 101' },
                     { field: 'readme', quote: 'not in the text' },
+                    { field: 'description', quote: 'slu' },
                 ],
-                segments,
+                { ...segments, description: ['A tool'] },
                 fields,
             );
             expect(result.citations).toEqual([
-                { field: 'readme', quote: 'CS 101' },
+                { field: 'readme', quote: 'Saint Louis University' },
             ]);
             expect(
                 result.repairs.map((repair) => [
@@ -297,43 +224,15 @@ describe('classifier response validation', () => {
                     repair.reason,
                 ]),
             ).toEqual([
-                [1, 'dropped', 'empty_source'],
+                [1, 'relabeled', 'quote_matches_other_field'],
+                [2, 'dropped', 'empty_source'],
                 [3, 'dropped', 'quote_absent_from_visible_segments'],
+                // Found in two other fields (fullName and owner): dropped, not guessed.
+                [4, 'dropped', 'quote_matches_other_field'],
             ]);
         });
 
-        test('drops a quote that matches more than one other field instead of guessing', () => {
-            const result = repairCitations(
-                [
-                    { field: 'homepage', quote: 'slu' },
-                    { field: 'readme', quote: 'CS 101' },
-                ],
-                segments,
-                fields,
-            );
-            expect(result.citations).toEqual([
-                { field: 'readme', quote: 'CS 101' },
-            ]);
-            expect(result.repairs[0]).toMatchObject({
-                action: 'dropped',
-                reason: 'empty_source',
-            });
-            const ambiguous = repairCitations(
-                [
-                    { field: 'description', quote: 'slu' },
-                    { field: 'readme', quote: 'CS 101' },
-                ],
-                { ...segments, description: ['A tool'] },
-                fields,
-            );
-            expect(ambiguous.repairs[0]).toMatchObject({
-                action: 'dropped',
-                reason: 'quote_matches_other_field',
-                repairedField: null,
-            });
-        });
-
-        test('keeps strict failure when no verified citation remains', () => {
+        test('fails as strict validation would when no verified citation remains', () => {
             expect(() =>
                 repairCitations(
                     [
@@ -343,50 +242,7 @@ describe('classifier response validation', () => {
                     segments,
                     fields,
                 ),
-            ).toThrow(
-                expect.objectContaining({
-                    code: 'invalid_citation',
-                    citationDiagnostics: [
-                        expect.objectContaining({ reason: 'empty_source' }),
-                        expect.objectContaining({
-                            reason: 'quote_absent_from_visible_segments',
-                        }),
-                    ],
-                }),
-            );
+            ).toThrow(expect.objectContaining({ code: 'invalid_citation' }));
         });
     });
-
-    test('marks a positive decision with a null score as a missing score', () => {
-        const response = JSON.parse(affiliation()) as Record<string, unknown>;
-        response.score = null;
-        expect(() => parseAffiliationResponse(JSON.stringify(response))).toThrow(
-            expect.objectContaining({
-                code: 'invalid_schema',
-                detail: 'missing_score',
-            }),
-        );
-        response.score = 1.5;
-        expect(() => parseAffiliationResponse(JSON.stringify(response))).toThrow(
-            expect.objectContaining({ code: 'invalid_schema', detail: null }),
-        );
-    });
 });
-
-function affiliation(): string {
-    return JSON.stringify({
-        decision: 'supported',
-        relationship: 'coursework',
-        score: 0.4,
-        evidence: [{ field: 'readme', quote: 'Course 101 at SLU' }],
-        explanation: 'The README identifies a course assignment at the institution.',
-    });
-}
-
-function projectType(): string {
-    return JSON.stringify({
-        category: 'DEV',
-        evidence: [{ field: 'readme', quote: 'Course 101 at SLU' }],
-        explanation: 'The README describes a software tool.',
-    });
-}

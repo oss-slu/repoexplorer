@@ -102,9 +102,15 @@ export function validateScrapingConfiguration(
         ...(value.enrichmentApi === undefined
             ? {}
             : { enrichmentApi: readEnrichmentApi(value.enrichmentApi) }),
-        classification: validateClassificationConfiguration(
-            value.classification ?? DEFAULT_CLASSIFICATION_CONFIGURATION,
-        ),
+        // No implicit provider: without a classification block, `classify`
+        // refuses to run instead of sending repositories to a default model.
+        ...(value.classification === undefined
+            ? {}
+            : {
+                  classification: validateClassificationConfiguration(
+                      value.classification,
+                  ),
+              }),
     };
 }
 
@@ -231,16 +237,27 @@ export function validateClassificationConfiguration(
             0,
             8,
         ),
-        promptVersion: requireNonEmptyString(
-            value.promptVersion ??
-                DEFAULT_CLASSIFICATION_CONFIGURATION.promptVersion,
-            'classification.promptVersion',
-        ),
+        promptVersion: readPromptVersion(value.promptVersion),
         citationMode,
         affiliationEvidenceGate,
         truncation,
         generation,
     };
+}
+
+/** v2 is kept to reproduce the earlier baseline; v3 adds the score rubric. */
+const PROMPT_VERSIONS = ['v2', 'v3'] as const;
+
+function readPromptVersion(value: unknown): string {
+    const version = value ?? DEFAULT_CLASSIFICATION_CONFIGURATION.promptVersion;
+    if (
+        !PROMPT_VERSIONS.includes(version as (typeof PROMPT_VERSIONS)[number])
+    ) {
+        throw new TypeError(
+            `classification.promptVersion must be one of ${PROMPT_VERSIONS.join(', ')}`,
+        );
+    }
+    return version as string;
 }
 
 function validateGenerationSettings(

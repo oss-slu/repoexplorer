@@ -1,13 +1,16 @@
-import { readFile } from 'node:fs/promises';
+import { jest } from '@jest/globals';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
 import { ClassificationStore } from '../classification/store';
 import { FakeClassificationClient } from '../classification/client';
 import { runClassification } from '../classification/runner';
-import type { ClassificationPrediction } from '../types/scraping';
 import { RepositoryStore } from '../db/repositoryStore';
 import type { RepositoryScrapingRecord } from '../types/scraping';
 import { validateClassificationConfiguration } from '../config';
+import { runClassificationCli } from '../classificationCli';
 
 const databaseUrl = process.env.FINDER_TEST_DATABASE_URL;
 const adminDatabaseUrl =
@@ -68,47 +71,6 @@ integrationDescribe('ClassificationStore PostgreSQL integration', () => {
         }
     });
 
-    test('persists independent results for the same repository under two universities', async () => {
-        const id = 8_765_432_901;
-        const firstUniversity = `${prefix}-one`;
-        const secondUniversity = `${prefix}-two`;
-        const scraperStore = new RepositoryStore(pool);
-        await scraperStore.upsertUniversity(firstUniversity, [
-            record(firstUniversity, id),
-        ]);
-        await scraperStore.upsertUniversity(secondUniversity, [
-            record(secondUniversity, id),
-        ]);
-
-        const firstCandidate = (await store.listCandidates(firstUniversity))[0];
-        expect(firstCandidate).toMatchObject({
-            id,
-            university: firstUniversity,
-            archived: false,
-            isTemplate: false,
-        });
-        const firstPrediction = prediction(id, firstUniversity, 'a'.repeat(64));
-        const secondPrediction = prediction(
-            id,
-            secondUniversity,
-            'b'.repeat(64),
-        );
-        await store.savePrediction(firstPrediction);
-        await store.savePrediction(secondPrediction);
-
-        expect(await store.findPrediction(firstPrediction)).toMatchObject(
-            firstPrediction,
-        );
-        expect(await store.findPrediction(secondPrediction)).toMatchObject(
-            secondPrediction,
-        );
-        const rows = await adminPool.query(
-            'SELECT count(*)::int AS count FROM public.repository_classification_predictions WHERE id = $1 AND university LIKE $2',
-            [id, `${prefix}%`],
-        );
-        expect(rows.rows[0].count).toBe(2);
-    });
-
     test('persists a gate downgrade as an uncertain row the CHECK constraints accept', async () => {
         const id = 8_765_432_903;
         const university = `${prefix}-gated`;
@@ -166,91 +128,135 @@ integrationDescribe('ClassificationStore PostgreSQL integration', () => {
         ]);
     });
 
-    test('runs the classifier offline against staged PostgreSQL candidates', async () => {
+    test('classify CLI end to end: mock run, gate, two universities, resume', async () => {
         const id = 8_765_432_902;
-        const university = `${prefix}-offline`;
-        await new RepositoryStore(pool).upsertUniversity(university, [
-            record(university, id),
-        ]);
-
-        const report = await runClassification({
-            store,
-            client: new FakeClassificationClient([
-                '{"decision":"supported","relationship":"institutional_project","score":0.8,"evidence":[{"field":"readme","quote":"# Project"}],"explanation":"The README documents an institutional project."}',
-                '{"category":"DEV","evidence":[{"field":"readme","quote":"# Project"}],"explanation":"The repository is a software project."}',
-            ]),
-            // The quote does not name the institution; the gate has its own test.
-            configuration: validateClassificationConfiguration({
-                concurrency: 1,
-                threshold: 0.4,
-                affiliationEvidenceGate: 'off',
-            }),
-            universities: [
-                { key: university, fullName: 'Test University', acronym: 'TU' },
-            ],
-        });
-
-        expect(report.simulated).toBe(true);
-        expect(report.failures).toEqual([]);
-        expect(report.universities[0]).toMatchObject({
-            candidates: 1,
-            eligible: 1,
-            affiliationPredicted: 1,
-            projectTypesPredicted: 1,
-        });
-        const rows = await adminPool.query(
-            `SELECT task, score, category, simulated, status
-             FROM public.repository_classification_predictions
-             WHERE id = $1 AND university = $2 ORDER BY task`,
-            [id, university],
+        const named = `${prefix}-named`;
+        const other = `${prefix}-other`;
+        const scraperStore = new RepositoryStore(pool);
+        // The same repository is staged under two universities; only the
+        // first is named in its README.
+        for (const university of [named, other]) {
+            await scraperStore.upsertUniversity(university, [
+                {
+                    ...record(university, id),
+                    readme: '# Project\n\nBuilt by students at Alpha Test University.',
+                },
+            ]);
+        }
+        const directory = await mkdtemp(
+            path.join(os.tmpdir(), 'classify-e2e-'),
         );
-        expect(rows.rows).toEqual([
-            {
-                task: 'affiliation',
-                score: 0.8,
-                category: null,
-                simulated: true,
-                status: 'predicted',
-            },
-            {
-                task: 'project_type',
-                score: null,
-                category: 'DEV',
-                simulated: true,
-                status: 'predicted',
-            },
-        ]);
+        const configPath = path.join(directory, 'universities.json');
+        await writeFile(
+            configPath,
+            JSON.stringify({
+                classification: {
+                    citationMode: 'evidence_id',
+                    concurrency: 1,
+                },
+                universities: [
+                    {
+                        key: named,
+                        fullName: 'Alpha Test University',
+                        acronym: 'ATU',
+                    },
+                    {
+                        key: other,
+                        fullName: 'Beta Test College',
+                        acronym: 'BTC',
+                    },
+                ],
+            }),
+        );
+
+        const run = async () => {
+            const stdout: string[] = [];
+            const out = jest
+                .spyOn(process.stdout, 'write')
+                .mockImplementation((chunk) => {
+                    stdout.push(String(chunk));
+                    return true;
+                });
+            const err = jest
+                .spyOn(process.stderr, 'write')
+                .mockImplementation(() => true);
+            try {
+                const exitCode = await withDatabaseEnvironment(() =>
+                    runClassificationCli(['--config', configPath, '--mock']),
+                );
+                const summary = stdout.join('');
+                const reportPath = summary.match(/report: (\S+)/)?.[1];
+                if (reportPath) await rm(reportPath, { force: true });
+                return { exitCode, summary };
+            } finally {
+                out.mockRestore();
+                err.mockRestore();
+            }
+        };
+
+        try {
+            const first = await run();
+            expect(first.exitCode).toBe(0);
+            expect(first.summary).toMatch(/^COMPLETED/);
+            expect(first.summary).toContain('affiliation supported: 1;');
+            expect(first.summary).toContain('uncertain: 1;');
+            expect(first.summary).toContain('failed: 0;');
+
+            const rows = await adminPool.query(
+                `SELECT university, task, status, affiliation_decision, category, simulated,
+                        affiliation_evidence->0->>'quote' AS quote
+                 FROM public.repository_classification_predictions
+                 WHERE id = $1 AND university = ANY($2) ORDER BY university DESC, task`,
+                [id, [named, other]],
+            );
+            expect(rows.rows).toEqual([
+                {
+                    university: other,
+                    task: 'affiliation',
+                    status: 'uncertain',
+                    affiliation_decision: 'uncertain',
+                    category: null,
+                    simulated: true,
+                    quote: null,
+                },
+                {
+                    university: other,
+                    task: 'project_type',
+                    status: 'skipped_affiliation_uncertain',
+                    affiliation_decision: null,
+                    category: null,
+                    simulated: true,
+                    quote: null,
+                },
+                {
+                    university: named,
+                    task: 'affiliation',
+                    status: 'predicted',
+                    affiliation_decision: 'supported',
+                    category: null,
+                    simulated: true,
+                    quote: expect.stringContaining('Alpha Test University'),
+                },
+                {
+                    university: named,
+                    task: 'project_type',
+                    status: 'predicted',
+                    affiliation_decision: null,
+                    category: 'DEV',
+                    simulated: true,
+                    quote: null,
+                },
+            ]);
+
+            // A second run with unchanged inputs reuses every stored row.
+            const second = await run();
+            expect(second.exitCode).toBe(0);
+            expect(second.summary).toContain('resumed: 4;');
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
     });
 });
-
-function prediction(
-    id: number,
-    university: string,
-    inputHash: string,
-): ClassificationPrediction {
-    return {
-        id,
-        university,
-        task: 'affiliation',
-        provider: 'test',
-        model: 'fixed',
-        promptVersion: 'v1',
-        threshold: 0.4,
-        inputHash,
-        score: 0.75,
-        category: null,
-        affiliationDecision: 'supported',
-        affiliationRelationship: 'institutional_project',
-        affiliationEvidence: [
-            { field: 'readme', quote: 'Test prediction.' },
-        ],
-        explanation: 'Test prediction.',
-        status: 'predicted',
-        simulated: true,
-        errorMessage: null,
-        classifiedAt: '2026-10-26T12:00:00.000Z',
-    };
-}
 
 function record(university: string, id: number): RepositoryScrapingRecord {
     return {
@@ -338,4 +344,30 @@ async function executeFormattedSql(
         parameters,
     );
     await pool.query(formatted.rows[0].statement);
+}
+
+/** Runs `action` with the PG* variables the CLI reads, taken from the test URL. */
+async function withDatabaseEnvironment<T>(
+    action: () => Promise<T>,
+): Promise<T> {
+    const url = new URL(databaseUrl!);
+    const values: Record<string, string> = {
+        PGHOST: url.hostname,
+        PGPORT: url.port || '5432',
+        PGDATABASE: decodeURIComponent(url.pathname.slice(1)),
+        PGUSER: decodeURIComponent(url.username),
+        PGPASSWORD: decodeURIComponent(url.password),
+    };
+    const saved = Object.fromEntries(
+        Object.keys(values).map((key) => [key, process.env[key]]),
+    );
+    Object.assign(process.env, values);
+    try {
+        return await action();
+    } finally {
+        for (const [key, value] of Object.entries(saved)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+    }
 }

@@ -1351,7 +1351,7 @@ function canonicalStringify(value: unknown): string {
     if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(',')}]`;
     if (value !== null && typeof value === 'object') {
         const record = value as Record<string, unknown>;
-        return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalStringify(record[key])}`).join(',')}}`;
+        return `{${Object.keys(record).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map((key) => `${JSON.stringify(key)}:${canonicalStringify(record[key])}`).join(',')}}`;
     }
     return JSON.stringify(value) ?? 'null';
 }

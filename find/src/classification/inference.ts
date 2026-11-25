@@ -447,8 +447,9 @@ function canonicalStringify(value: unknown): string {
     }
     if (value !== null && typeof value === 'object') {
         const record = value as Record<string, unknown>;
+        // Code-unit order, as the default sort, so stored fingerprints keep matching.
         return `{${Object.keys(record)
-            .sort()
+            .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
             .map((key) => `${JSON.stringify(key)}:${canonicalStringify(record[key])}`)
             .join(',')}}`;
     }

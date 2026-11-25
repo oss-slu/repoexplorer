@@ -91,7 +91,9 @@ export async function runClassificationCli(
     const options = parseClassificationCliOptions(arguments_);
     const configuration = await loadScrapingConfiguration(options.configPath);
     if (!configuration.classification) {
-        throw new TypeError('The configuration has no classification settings');
+        throw new TypeError(
+            'The configuration has no classification block; copy one from config/universities.example.json',
+        );
     }
     getDatabasePoolConfig();
     const pool = createDatabasePool();

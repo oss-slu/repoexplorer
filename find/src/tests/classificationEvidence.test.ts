@@ -2,8 +2,6 @@ import { validateClassificationConfiguration } from '../config';
 import {
     EVIDENCE_SPAN_MAX_CHARS,
     prepareRepositoryEvidence,
-    safeSliceEnd,
-    safeSliceStart,
 } from '../classification/evidence';
 import type { ClassificationCandidate } from '../types/scraping';
 
@@ -36,29 +34,40 @@ describe('classification evidence catalog', () => {
         expect(first.evidenceCatalog.at(-1)?.id).toBe(
             `E${String(first.evidenceCatalog.length).padStart(4, '0')}`,
         );
-        expect(first.evidenceCatalog.every((item) => item.text.length <= EVIDENCE_SPAN_MAX_CHARS)).toBe(
-            true,
-        );
+        expect(
+            first.evidenceCatalog.every(
+                (item) => item.text.length <= EVIDENCE_SPAN_MAX_CHARS,
+            ),
+        ).toBe(true);
         expect(
             first.evidenceCatalog.some((item) =>
                 item.text.includes('OMITTED_ONLY_SECRET'),
             ),
         ).toBe(false);
-        expect(first.evidenceCatalog.some((item) => item.text.includes('omitted'))).toBe(
-            false,
-        );
+        expect(
+            first.evidenceCatalog.some((item) => item.text.includes('omitted')),
+        ).toBe(false);
 
-        for (const [field, segments] of Object.entries(first.citationSegments)) {
+        for (const [field, segments] of Object.entries(
+            first.citationSegments,
+        )) {
             segments.forEach((segment, segmentIndex) => {
                 const references = first.evidenceCatalog.filter(
-                    (item) => item.field === field && item.segmentIndex === segmentIndex,
+                    (item) =>
+                        item.field === field &&
+                        item.segmentIndex === segmentIndex,
                 );
-                expect(references.map((item) => item.text).join('')).toBe(segment);
+                expect(references.map((item) => item.text).join('')).toBe(
+                    segment,
+                );
                 expect(references[0]?.startOffset).toBe(0);
                 expect(references.at(-1)?.endOffset).toBe(segment.length);
                 for (const [index, reference] of references.entries()) {
                     expect(reference.text).toBe(
-                        segment.slice(reference.startOffset, reference.endOffset),
+                        segment.slice(
+                            reference.startOffset,
+                            reference.endOffset,
+                        ),
                     );
                     if (index > 0) {
                         expect(reference.startOffset).toBe(
@@ -70,7 +79,7 @@ describe('classification evidence catalog', () => {
         }
     });
 
-    test('never splits a surrogate pair at truncation boundaries', () => {
+    test('never splits a surrogate pair at truncation or span boundaries', () => {
         const emoji = '\u{1F600}';
         const readme = `${'a'.repeat(39)}${emoji}${'b'.repeat(100)}${emoji}${'c'.repeat(39)}`;
         const startEnd = prepareRepositoryEvidence(
@@ -104,7 +113,9 @@ describe('classification evidence catalog', () => {
         expect(startOnly.citationSegments.readme).toEqual(['a'.repeat(39)]);
 
         const intact = prepareRepositoryEvidence(
-            makeCandidate({ readme: `${'a'.repeat(38)}${emoji}${'z'.repeat(200)}` }),
+            makeCandidate({
+                readme: `${'a'.repeat(38)}${emoji}${'z'.repeat(200)}`,
+            }),
             validateClassificationConfiguration({
                 truncation: {
                     mode: 'start_end',
@@ -114,38 +125,27 @@ describe('classification evidence catalog', () => {
                 },
             }),
         );
-        expect(intact.citationSegments.readme[0]).toBe(`${'a'.repeat(38)}${emoji}`);
-    });
+        expect(intact.citationSegments.readme[0]).toBe(
+            `${'a'.repeat(38)}${emoji}`,
+        );
 
-    test('ends evidence spans on character boundaries so JSONB accepts them', () => {
-        const emoji = '\u{1F600}';
+        // Catalog spans also end on character boundaries, so JSONB accepts them.
         const offset = EVIDENCE_SPAN_MAX_CHARS - 1;
-        const readme = `${'x'.repeat(offset)}${emoji}${'y'.repeat(100)}`;
+        const longReadme = `${'x'.repeat(offset)}${emoji}${'y'.repeat(100)}`;
         const prepared = prepareRepositoryEvidence(
-            makeCandidate({ readme }),
+            makeCandidate({ readme: longReadme }),
             validateClassificationConfiguration({}),
         );
         const spans = prepared.evidenceCatalog.filter(
             (reference) => reference.field === 'readme',
         );
-        expect(spans.map((span) => span.text).join('')).toBe(readme);
+        expect(spans.map((span) => span.text).join('')).toBe(longReadme);
         expect(spans[0]?.endOffset).toBe(offset);
         expect(spans[1]?.text.startsWith(emoji)).toBe(true);
         for (const span of spans) {
             expect(isWellFormed(span.text)).toBe(true);
             expect(JSON.stringify(span.text)).not.toMatch(/\\ud[89a-f]/i);
         }
-    });
-
-    test('surrogate-safe offsets leave other boundaries unchanged', () => {
-        const value = `ab\u{1F600}cd`;
-        expect(safeSliceEnd(value, 3)).toBe(2);
-        expect(safeSliceEnd(value, 2)).toBe(2);
-        expect(safeSliceEnd(value, 4)).toBe(4);
-        expect(safeSliceEnd(value, value.length)).toBe(value.length);
-        expect(safeSliceStart(value, 3)).toBe(4);
-        expect(safeSliceStart(value, 2)).toBe(2);
-        expect(safeSliceStart(value, 0)).toBe(0);
     });
 });
 

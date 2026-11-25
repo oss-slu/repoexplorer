@@ -104,7 +104,7 @@ export function matchContextFor(candidate: {
 
 /**
  * True when a citation names the target institution (rule
- * names-institution-v3):
+ * names-institution-v4):
  * - its full name or one of its alternate names, ignoring case and
  *   punctuation;
  * - an email address at one of its domains, or the domain as the host of
@@ -118,8 +118,9 @@ export function matchContextFor(candidate: {
  * Nothing counts when the quote or the repository text contains one of the
  * institution's excluded names (a different institution with a similar
  * name). Citations from the owner or fullName fields never count, and the
- * owner login is removed from quotes first: an organization login is shared
- * by every repository it owns, so it is not evidence about this one.
+ * owner login, as a whole token, never supplies the acronym or a name it
+ * spells itself: an organization login is shared by every repository it
+ * owns, so it is not evidence about this one.
  */
 export function citationNamesInstitution(
     citation: { field: string; quote: string },
@@ -139,20 +140,41 @@ export function quoteNamesInstitution(
     options: { homepage?: boolean } = {},
 ): boolean {
     const ownerLogin = context.ownerLogin?.trim() ?? '';
+    // An organization login appears in every repository's URLs and badges.
+    // Remove it as a whole token (never inside a longer word), and only where
+    // it could produce the match: before acronym matching, and before name
+    // matching when the login itself spells that name.
     const stripOwner = (value: string) =>
         ownerLogin === ''
             ? value
-            : value.replace(new RegExp(escapeRegExp(ownerLogin), 'gi'), ' ');
-    const text = stripOwner(quote);
-    const repositoryText = stripOwner(context.repositoryText ?? '');
+            : value.replace(
+                  new RegExp(
+                      `(?<![\\p{L}\\p{N}])${escapeRegExp(ownerLogin)}(?![\\p{L}\\p{N}])`,
+                      'giu',
+                  ),
+                  ' ',
+              );
+    const ownerNormalized = ` ${normalizeForMatching(ownerLogin)} `;
+    const namesIn = (value: string) =>
+        [institution.fullName, ...(institution.alternateNames ?? [])].some(
+            (name) =>
+                containsFullName(
+                    ownerNormalized.includes(` ${normalizeForMatching(name)} `)
+                        ? stripOwner(value)
+                        : value,
+                    name,
+                ),
+        );
+    const repositoryText = context.repositoryText ?? '';
     if (
-        mentionsExcludedName(text, institution) ||
+        mentionsExcludedName(quote, institution) ||
         mentionsExcludedName(repositoryText, institution)
     ) {
         return false;
     }
-    if (containsAnyName(text, institution)) return true;
-    if (namesEmailDomain(text, institution, options.homepage === true)) {
+    if (namesIn(quote)) return true;
+    // Logins cannot contain a dot, so they never form an email domain.
+    if (namesEmailDomain(quote, institution, options.homepage === true)) {
         return true;
     }
     const acronym = institution.acronym.trim();
@@ -161,16 +183,10 @@ export function quoteNamesInstitution(
         `(?<![\\p{L}\\p{N}_])${escapeRegExp(acronym)}(?![\\p{L}\\p{N}_])`,
         acronym.length <= SHORT_ACRONYM_MAX_LENGTH ? 'u' : 'iu',
     );
-    if (!pattern.test(text)) return false;
+    if (!pattern.test(stripOwner(quote))) return false;
     return (
-        containsAnyName(repositoryText, institution) ||
+        namesIn(repositoryText) ||
         loginTokens(ownerLogin).includes(acronym.toLowerCase())
-    );
-}
-
-function containsAnyName(text: string, institution: InstitutionNames): boolean {
-    return [institution.fullName, ...(institution.alternateNames ?? [])].some(
-        (name) => containsFullName(text, name),
     );
 }
 

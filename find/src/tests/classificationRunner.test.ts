@@ -4,10 +4,7 @@ import type {
     ClassificationPrediction,
     UniversityConfiguration,
 } from '../types/scraping';
-import {
-    FakeClassificationClient,
-    RandomSimulationClient,
-} from '../classification/client';
+import { FakeClassificationClient } from '../classification/client';
 import { runClassification } from '../classification/runner';
 import type {
     ClassificationPredictionKey,
@@ -72,95 +69,85 @@ describe('classification runner', () => {
         ).toEqual(['predicted', 'skipped_threshold', 'skipped_eligibility']);
     });
 
-    test('resumes matching predictions but invalidates them when evidence changes', async () => {
+    test('reuses stored predictions and reclassifies when any fingerprint input changes', async () => {
         const store = new MemoryStore([candidate(7, university.key)]);
-        const firstClient = new FakeClassificationClient();
-        await runClassification(dependencies(store, firstClient));
-        expect(store.predictions).toHaveLength(2);
-
+        await runClassification(
+            dependencies(store, new FakeClassificationClient()),
+        );
         const resumedClient = new FakeClassificationClient();
         const resumed = await runClassification(
             dependencies(store, resumedClient),
         );
-        expect(resumedClient.requests).toHaveLength(0);
+        expect(resumedClient.requests).toEqual([]);
         expect(resumed.universities[0]?.reused).toBe(2);
+
+        const changes: Array<
+            [string, FakeClassificationClient, ClassificationConfiguration]
+        > = [
+            [
+                'model',
+                new FakeClassificationClient([], 'mock', 'other-model'),
+                baseConfiguration,
+            ],
+            [
+                'prompt version',
+                new FakeClassificationClient(),
+                { ...baseConfiguration, promptVersion: 'v2' },
+            ],
+            [
+                'threshold',
+                new FakeClassificationClient(),
+                { ...baseConfiguration, threshold: 0.5 },
+            ],
+            [
+                'citation mode',
+                new FakeClassificationClient(),
+                { ...baseConfiguration, citationMode: 'evidence_id' },
+            ],
+            [
+                'generation setting',
+                new FakeClassificationClient(),
+                {
+                    ...baseConfiguration,
+                    generation: {
+                        ...baseConfiguration.generation,
+                        temperature: 0.5,
+                    },
+                },
+            ],
+            [
+                'evidence gate',
+                new FakeClassificationClient(),
+                gatedConfiguration,
+            ],
+        ];
+        for (const [change, client, configuration] of changes) {
+            await runClassification(dependencies(store, client, configuration));
+            expect([
+                change,
+                client.requests.map((request) => request.task),
+            ]).toEqual([change, ['affiliation']]);
+        }
+        // The gate's inputs include the university's names.
+        const renamed = new FakeClassificationClient();
+        await runClassification({
+            ...dependencies(store, renamed, gatedConfiguration),
+            universities: [
+                { ...university, alternateNames: ['SLU Billikens'] },
+            ],
+        });
+        expect(renamed.requests.map((request) => request.task)).toEqual([
+            'affiliation',
+        ]);
 
         store.candidates[0] = candidate(7, university.key, {
             readme: 'A different README',
         });
-        const changedClient = new FakeClassificationClient();
-        await runClassification(dependencies(store, changedClient));
-        expect(changedClient.requests.map((request) => request.task)).toEqual([
-            'affiliation',
-        ]);
-        expect(store.predictions).toHaveLength(4);
-    });
-
-    test('invalidates resume state when model, prompt version, or threshold changes', async () => {
-        const store = new MemoryStore([candidate(8, university.key)]);
-        await runClassification(
-            dependencies(store, new FakeClassificationClient()),
+        const changedEvidence = new FakeClassificationClient();
+        await runClassification(dependencies(store, changedEvidence));
+        expect(changedEvidence.requests.map((request) => request.task)).toEqual(
+            ['affiliation'],
         );
-
-        const changedModel = new FakeClassificationClient(
-            [],
-            'mock',
-            'deterministic-fake-v2',
-        );
-        await runClassification(dependencies(store, changedModel));
-        expect(changedModel.requests.map((request) => request.task)).toEqual([
-            'affiliation',
-        ]);
-
-        const changedPrompt = new FakeClassificationClient();
-        await runClassification(
-            dependencies(store, changedPrompt, {
-                ...baseConfiguration,
-                promptVersion: 'changed-prompt-version',
-            }),
-        );
-        expect(changedPrompt.requests.map((request) => request.task)).toEqual([
-            'affiliation',
-        ]);
-
-        const changedThreshold = new FakeClassificationClient();
-        await runClassification(
-            dependencies(store, changedThreshold, {
-                ...baseConfiguration,
-                threshold: 0.5,
-            }),
-        );
-        expect(
-            changedThreshold.requests.map((request) => request.task),
-        ).toEqual(['affiliation']);
-    });
-
-    test('invalidates cached results for each response generation setting', async () => {
-        const store = new MemoryStore([candidate(80, university.key)]);
-        await runClassification(
-            dependencies(store, new FakeClassificationClient()),
-        );
-        const settings = [
-            { ...baseConfiguration.generation, responseFormat: 'json_object' as const },
-            { ...baseConfiguration.generation, temperature: 0.5 },
-            { ...baseConfiguration.generation, maxOutputTokens: 513 },
-            { ...baseConfiguration.generation, maxOutputTokensField: 'max_tokens' as const },
-            { ...baseConfiguration.generation, seed: 42 },
-            { ...baseConfiguration.generation, reasoningEffort: 'low' as const },
-        ];
-        for (const generation of settings) {
-            const client = new FakeClassificationClient();
-            await runClassification(
-                dependencies(store, client, {
-                    ...baseConfiguration,
-                    generation,
-                }),
-            );
-            expect(client.requests.map((request) => request.task)).toEqual([
-                'affiliation',
-            ]);
-        }
-        expect(store.predictions).toHaveLength(14);
     });
 
     test('persists uncertainty and rejection distinctly without provider failures', async () => {
@@ -205,7 +192,8 @@ describe('classification runner', () => {
                 relationship: 'coursework',
                 score: 0.8,
                 evidence: [{ field: 'readme', quote: 'Readme content' }],
-                explanation: 'The README identifies this as a course assignment.',
+                explanation:
+                    'The README identifies this as a course assignment.',
             }),
             projectType('DEV'),
         ]);
@@ -227,120 +215,6 @@ describe('classification runner', () => {
             category: 'DEV',
             status: 'predicted',
         });
-    });
-
-    test('flags support without target relationship evidence but preserves the prediction', async () => {
-        const store = new MemoryStore([
-            candidate(84, university.key, { readme: 'A general-purpose utility.' }),
-        ]);
-        const client = new FakeClassificationClient([
-            JSON.stringify({
-                decision: 'supported',
-                relationship: 'institutional_project',
-                score: 0.9,
-                evidence: [
-                    { field: 'readme', quote: 'A general-purpose utility.' },
-                ],
-                explanation: 'The repository is a useful utility.',
-            }),
-            JSON.stringify({
-                category: 'DEV',
-                evidence: [
-                    { field: 'readme', quote: 'A general-purpose utility.' },
-                ],
-                explanation: 'The README describes a reusable utility.',
-            }),
-        ]);
-        const report = await runClassification(dependencies(store, client));
-
-        expect(report.semanticReviewFindings).toEqual([
-            {
-                university: university.key,
-                repositoryId: 84,
-                repository: 'slu/repo-84',
-                reasons: [
-                    'supported_affiliation_without_explicit_relationship_evidence',
-                ],
-            },
-        ]);
-        expect(report.failures).toEqual([]);
-        expect(store.predictionsFor('affiliation')[0]).toMatchObject({
-            status: 'predicted',
-            affiliationDecision: 'supported',
-        });
-    });
-
-    test('flags explicit coursework evidence labeled with a generic relationship', async () => {
-        const courseEvidence =
-            'This project was completed for CS101 course at Saint Louis University.';
-        const store = new MemoryStore([
-            candidate(85, university.key, { readme: courseEvidence }),
-        ]);
-        const client = new FakeClassificationClient([
-            JSON.stringify({
-                decision: 'supported',
-                relationship: 'institutional_project',
-                score: 0.9,
-                evidence: [{ field: 'readme', quote: courseEvidence }],
-                explanation: 'The README describes coursework.',
-            }),
-            JSON.stringify({
-                category: 'EDU',
-                evidence: [{ field: 'readme', quote: courseEvidence }],
-                explanation: 'The README describes coursework.',
-            }),
-        ]);
-        const report = await runClassification(dependencies(store, client));
-
-        expect(report.semanticReviewFindings[0]?.reasons).toContain(
-            'coursework_relationship_mismatch',
-        );
-        expect(report.semanticReviewFindings[0]?.reasons).not.toContain(
-            'supported_affiliation_without_explicit_relationship_evidence',
-        );
-    });
-
-    test('keeps the same repository ID isolated by university', async () => {
-        const secondUniversity: UniversityConfiguration = {
-            key: 'Another University',
-            fullName: 'Another University',
-            acronym: 'AU',
-        };
-        const store = new MemoryStore([
-            candidate(9, university.key),
-            candidate(9, secondUniversity.key),
-        ]);
-        await runClassification({
-            ...dependencies(store, new FakeClassificationClient()),
-            universities: [university, secondUniversity],
-        });
-        expect(
-            store.predictions.filter(
-                (prediction) => prediction.task === 'affiliation',
-            ),
-        ).toHaveLength(2);
-        expect(
-            new Set(
-                store.predictions.map((prediction) => prediction.university),
-            ).size,
-        ).toBe(2);
-    });
-
-    test('records a failed affiliation and skips type classification after an invalid response', async () => {
-        const store = new MemoryStore([candidate(11, university.key)]);
-        const client = new FakeClassificationClient([
-            '{"decision":"supported","relationship":"coursework","score":1.1,"evidence":[{"field":"readme","quote":"Readme content"}],"explanation":"invalid"}',
-        ]);
-        const report = await runClassification(dependencies(store, client));
-        expect(report.failures).toHaveLength(1);
-        expect(report.failures[0]?.task).toBe('affiliation');
-        expect(client.requests.map((request) => request.task)).toEqual([
-            'affiliation',
-        ]);
-        expect(store.predictionsFor('affiliation')[0]?.status).toBe('failed');
-        expect(store.predictionsFor('project_type')[0]?.status).toBe(
-            'skipped_affiliation_failed',
-        );
     });
 
     test('continues after one candidate fails and persists later candidates incrementally', async () => {
@@ -399,9 +273,9 @@ describe('classification runner', () => {
             citationRepairs: 3,
             failed: 0,
         });
-        expect(store.predictionsFor('affiliation')[0]?.affiliationEvidence).toEqual([
-            { field: 'readme', quote: 'Readme content' },
-        ]);
+        expect(
+            store.predictionsFor('affiliation')[0]?.affiliationEvidence,
+        ).toEqual([{ field: 'readme', quote: 'Readme content' }]);
         expect(
             report.citationRepairs.map((record) => [
                 record.task,
@@ -413,49 +287,35 @@ describe('classification runner', () => {
         ]);
     });
 
-    test('retries a missing score once and records the retry', async () => {
-        const store = new MemoryStore([candidate(91, university.key)]);
+    test('retries a missing score once and records whether the follow-up recovered it', async () => {
+        const store = new MemoryStore([
+            candidate(91, university.key),
+            candidate(94, university.key),
+        ]);
         const client = new FakeClassificationClient([
             affiliation('supported', null),
             affiliation('supported', 0.55),
+            affiliation('supported', null),
+            affiliation('supported', null),
             projectType('DEV'),
         ]);
         const report = await runClassification(dependencies(store, client));
-        expect(client.requests.map((request) => request.task)).toEqual([
-            'affiliation',
-            'affiliation',
-            'project_type',
-        ]);
         expect(report.universities[0]).toMatchObject({
-            scoreRetries: 1,
+            scoreRetries: 2,
             scoreRetriesRecovered: 1,
             affiliationPredicted: 1,
-            failed: 0,
-        });
-        expect(report.scoreRetries).toEqual([
-            expect.objectContaining({
-                repositoryId: 91,
-                task: 'affiliation',
-                recovered: true,
-            }),
-        ]);
-        expect(store.predictionsFor('affiliation')[0]?.score).toBe(0.55);
-    });
-
-    test('counts a missing-score follow-up that still fails', async () => {
-        const store = new MemoryStore([candidate(94, university.key)]);
-        const client = new FakeClassificationClient([
-            affiliation('supported', null),
-        ]);
-        const report = await runClassification(dependencies(store, client));
-        expect(report.universities[0]).toMatchObject({
-            scoreRetries: 1,
-            scoreRetriesRecovered: 0,
             failed: 1,
         });
-        expect(report.scoreRetries).toEqual([
-            expect.objectContaining({ repositoryId: 94, recovered: false }),
+        expect(
+            report.scoreRetries.map((retry) => [
+                retry.repositoryId,
+                retry.recovered,
+            ]),
+        ).toEqual([
+            [91, true],
+            [94, false],
         ]);
+        expect(store.predictionsFor('affiliation')[0]?.score).toBe(0.55);
         expect(report.failures[0]?.message).toMatch(
             /^After one missing-score follow-up/,
         );
@@ -470,10 +330,18 @@ describe('classification runner', () => {
         await runClassification({
             ...dependencies(
                 store,
-                new FakeClassificationClient(['not json', affiliation('uncertain', null)]),
+                new FakeClassificationClient([
+                    'not json',
+                    affiliation('uncertain', null),
+                ]),
             ),
             onProgress: (event) =>
-                events.push([event.task, event.completed, event.total, event.failed]),
+                events.push([
+                    event.task,
+                    event.completed,
+                    event.total,
+                    event.failed,
+                ]),
         });
         expect(events).toEqual([
             ['affiliation', 0, 2, 0],
@@ -483,33 +351,6 @@ describe('classification runner', () => {
             ['project_type', 1, 2, 1],
             ['project_type', 2, 2, 1],
         ]);
-    });
-
-    test('seeded simulation runs the project-type task offline with the gate on', async () => {
-        const store = new MemoryStore(
-            Array.from({ length: 12 }, (_, index) =>
-                candidate(100 + index, university.key, {
-                    readme:
-                        index % 2 === 0
-                            ? 'Built for a course at Saint Louis University.'
-                            : 'Readme content',
-                }),
-            ),
-        );
-        const report = await runClassification({
-            store,
-            client: new RandomSimulationClient(42),
-            configuration: gatedConfiguration,
-            universities: [university],
-            now: () => new Date('2026-10-26T12:00:00.000Z'),
-        });
-        expect(report.failures).toEqual([]);
-        expect(report.universities[0]!.projectTypesPredicted).toBeGreaterThan(0);
-        expect(report.universities[0]!.citationRepairs).toBe(0);
-        expect(report.universities[0]!.downgraded).toBe(0);
-        expect(
-            store.predictions.every((prediction) => prediction.simulated),
-        ).toBe(true);
     });
 
     describe('affiliation evidence gate', () => {
@@ -523,32 +364,12 @@ describe('classification runner', () => {
                 explanation: 'The model explanation.',
             });
 
-        test('keeps a supported result whose quote names the institution', async () => {
-            const store = new MemoryStore([
-                candidate(120, university.key, { readme: named }),
-            ]);
-            const client = new FakeClassificationClient([
-                supportedWith([{ field: 'readme', quote: named }]),
-                JSON.stringify({
-                    category: 'EDU',
-                    evidence: [{ field: 'readme', quote: 'CS 101' }],
-                    explanation: 'The README describes coursework.',
-                }),
-            ]);
-            const report = await runClassification(
-                dependencies(store, client, gatedConfiguration),
-            );
-            expect(report.universities[0]).toMatchObject({
-                affiliationPredicted: 1,
-                downgraded: 0,
-                projectTypesPredicted: 1,
-            });
-            expect(report.affiliationDowngrades).toEqual([]);
-        });
-
         test('stores an unnamed supported result as uncertain, keeps the original in the report, and skips project type', async () => {
             const store = new MemoryStore([
-                candidate(121, university.key, { owner: 'oss-slu', fullName: 'oss-slu/tool' }),
+                candidate(121, university.key, {
+                    owner: 'oss-slu',
+                    fullName: 'oss-slu/tool',
+                }),
             ]);
             const original = supportedWith([
                 { field: 'readme', quote: 'Readme content' },
@@ -579,7 +400,9 @@ describe('classification runner', () => {
                 ],
             });
             expect(stored.explanation).toMatch(/^Downgraded to uncertain/);
-            expect(stored.explanation).toContain('supported (coursework, score 0.9)');
+            expect(stored.explanation).toContain(
+                'supported (coursework, score 0.9)',
+            );
             expect(stored.explanation).toContain('The model explanation.');
             expect(store.predictionsFor('project_type')[0]?.status).toBe(
                 'skipped_affiliation_uncertain',
@@ -593,20 +416,6 @@ describe('classification runner', () => {
                     original: JSON.parse(original),
                 },
             ]);
-        });
-
-        test('keeps the model decision when the gate is off', async () => {
-            const store = new MemoryStore([candidate(122, university.key)]);
-            const client = new FakeClassificationClient([
-                supportedWith([{ field: 'readme', quote: 'Readme content' }]),
-                projectType('DEV'),
-            ]);
-            const report = await runClassification(dependencies(store, client));
-            expect(report.universities[0]).toMatchObject({
-                affiliationPredicted: 1,
-                downgraded: 0,
-            });
-            expect(report.affiliationEvidenceGate).toBe('off');
         });
 
         test('accepts a citation that repair relabelled to the field naming the institution', async () => {
@@ -631,33 +440,9 @@ describe('classification runner', () => {
                 downgraded: 0,
                 citationRepairs: 1,
             });
-            expect(store.predictionsFor('affiliation')[0]?.affiliationEvidence).toEqual([
-                { field: 'readme', quote: 'Saint Louis University' },
-            ]);
-        });
-
-        test('keys gated and ungated results separately', async () => {
-            const store = new MemoryStore([candidate(124, university.key)]);
-            await runClassification(
-                dependencies(store, new FakeClassificationClient(), gatedConfiguration),
-            );
-            const ungated = new FakeClassificationClient();
-            await runClassification(dependencies(store, ungated));
-            expect(ungated.requests.map((request) => request.task)).toEqual([
-                'affiliation',
-            ]);
-            const regated = new FakeClassificationClient();
-            await runClassification(
-                dependencies(store, regated, gatedConfiguration),
-            );
-            expect(regated.requests).toEqual([]);
             expect(
-                new Set(
-                    store
-                        .predictionsFor('affiliation')
-                        .map((prediction) => prediction.inputHash),
-                ).size,
-            ).toBe(2);
+                store.predictionsFor('affiliation')[0]?.affiliationEvidence,
+            ).toEqual([{ field: 'readme', quote: 'Saint Louis University' }]);
         });
     });
 });

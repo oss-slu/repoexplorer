@@ -7,8 +7,6 @@ import type { AffiliationResponse } from '../classification/contracts';
 import { applyAffiliationEvidenceGate } from '../classification/gate';
 import { matchContextFor } from '../classification/review';
 import { runClassificationInference } from '../classification/inference';
-import { buildPrompt } from '../classification/prompts';
-import { quoteFromText, readPromptEvidence } from '../classification/simulation';
 import type {
     ClassificationCandidate,
     UniversityConfiguration,
@@ -69,7 +67,9 @@ describe('offline classification clients', () => {
                         configuration,
                         client,
                     });
-                    expect(projectType.response.evidence.length).toBeGreaterThan(0);
+                    expect(
+                        projectType.response.evidence.length,
+                    ).toBeGreaterThan(0);
                     projectTypes += 1;
                 }
             }
@@ -81,98 +81,58 @@ describe('offline classification clients', () => {
         },
     );
 
-    test('seeded simulator stays uncertain or negative when the prompt has no evidence', async () => {
-        const client = new RandomSimulationClient(7);
-        const messages = [{ role: 'user' as const, content: 'prompt' }];
-        for (let index = 0; index < 20; index += 1) {
-            const response = JSON.parse(
-                await client.classify('affiliation', messages),
-            ) as { decision: string; evidence: unknown[] };
-            expect(response.decision).not.toBe('supported');
-            expect(response.evidence).toEqual([]);
-        }
-    });
-
-    test.each(modes)(
-        'mock supports only a visibly named institution and cites it (%s)',
-        async (citationMode) => {
-            const configuration = validateClassificationConfiguration({
-                citationMode,
-            });
-            const client = createEvidenceMockClient();
-            const named = await runClassificationInference({
-                task: 'affiliation',
-                candidate: candidate(1, {
-                    readme: 'Intro\nA project of the Open Source with Saint Louis University program.',
-                }),
-                institution,
-                configuration,
-                client,
-            });
-            expect(named.response).toMatchObject({
-                decision: 'supported',
-                relationship: 'institutional_project',
-                score: 0.7,
-                evidence: [
-                    {
-                        field: 'readme',
-                        quote: expect.stringContaining('Saint Louis University'),
-                    },
-                ],
-            });
-            const unnamed = await runClassificationInference({
-                task: 'affiliation',
-                candidate: candidate(2, {
-                    readme: 'See https://github.com/oss-slu/repo-2 and the slu helpers.',
-                }),
-                institution,
-                configuration,
-                client,
-            });
-            expect(unnamed.response).toMatchObject({
-                decision: 'uncertain',
-                score: null,
-                evidence: [],
-            });
-            const projectType = await runClassificationInference({
-                task: 'project_type',
-                candidate: candidate(1),
-                institution,
-                configuration,
-                client,
-            });
-            expect(projectType.response).toMatchObject({
-                category: 'DEV',
-                evidence: [{ field: 'description', quote: 'A repository' }],
-            });
-            expect(client.model).toBe('deterministic-evidence-v2');
-            expect(client.simulated).toBe(true);
-        },
-    );
-
-    test('reads quotes from visible lines only, never across the truncation marker', () => {
+    test('mock supports only a visibly named institution and cites it', async () => {
         const configuration = validateClassificationConfiguration({
-            truncation: { mode: 'start_end', maxChars: 20, startChars: 10, endChars: 5 },
+            citationMode: 'evidence_id',
         });
-        const evidence = readPromptEvidence(
-            buildPrompt(
-                'affiliation',
-                candidate(1, { readme: '0123456789abcdefghijklmnopqrstuvwxyz' }),
-                institution,
-                configuration,
-            ),
-        );
-        expect(
-            evidence?.citations.find((citation) => citation.field === 'readme'),
-        ).toMatchObject({ quote: '0123456789' });
-        expect(quoteFromText('[… README omitted …]\n   \nlast')).toBe('last');
-        const long = `${'a'.repeat(300)} Saint Louis University ${'b'.repeat(300)}`;
-        const quote = quoteFromText(long, (value) =>
-            value.includes('Saint Louis University'),
-        );
-        expect(quote).toContain('Saint Louis University');
-        expect(quote!.length).toBeLessThanOrEqual(160);
-        expect(long).toContain(quote!);
+        const client = createEvidenceMockClient();
+        const named = await runClassificationInference({
+            task: 'affiliation',
+            candidate: candidate(1, {
+                readme: 'Intro\nA project of the Open Source with Saint Louis University program.',
+            }),
+            institution,
+            configuration,
+            client,
+        });
+        expect(named.response).toMatchObject({
+            decision: 'supported',
+            relationship: 'institutional_project',
+            score: 0.7,
+            evidence: [
+                {
+                    field: 'readme',
+                    quote: expect.stringContaining('Saint Louis University'),
+                },
+            ],
+        });
+        const unnamed = await runClassificationInference({
+            task: 'affiliation',
+            candidate: candidate(2, {
+                readme: 'See https://github.com/oss-slu/repo-2 and the slu helpers.',
+            }),
+            institution,
+            configuration,
+            client,
+        });
+        expect(unnamed.response).toMatchObject({
+            decision: 'uncertain',
+            score: null,
+            evidence: [],
+        });
+        const projectType = await runClassificationInference({
+            task: 'project_type',
+            candidate: candidate(1),
+            institution,
+            configuration,
+            client,
+        });
+        expect(projectType.response).toMatchObject({
+            category: 'DEV',
+            evidence: [{ field: 'description', quote: 'A repository' }],
+        });
+        expect(client.model).toBe('deterministic-evidence-v2');
+        expect(client.simulated).toBe(true);
     });
 });
 

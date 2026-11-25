@@ -7,7 +7,7 @@ import {
 } from './review';
 
 /** Recorded in the input fingerprint; change it when the gate's rule changes. */
-export const AFFILIATION_GATE_VERSION = 'names-institution-v3';
+export const AFFILIATION_GATE_VERSION = 'names-institution-v4';
 
 export type AffiliationGateOutcome = {
     response: AffiliationResponse;
@@ -48,11 +48,28 @@ export function applyAffiliationEvidenceGate(
     };
 }
 
-/** Fingerprint policy; `off` keeps the pre-gate key so older ungated rows stay reusable. */
+/**
+ * Fingerprint policy: the gate version and every name the gate matches on, so
+ * editing a university's names reclassifies its rows. `off` keeps the
+ * pre-gate key so older ungated rows stay reusable.
+ */
 export function affiliationGatePolicy(
     mode: AffiliationEvidenceGate,
+    institution: InstitutionNames,
 ): Record<string, unknown> {
-    return mode === 'off'
-        ? {}
-        : { affiliationEvidenceGate: AFFILIATION_GATE_VERSION };
+    if (mode === 'off') return {};
+    const sorted = (values: readonly string[] | undefined) =>
+        [...(values ?? [])]
+            .map((value) => value.trim())
+            .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    return {
+        affiliationEvidenceGate: AFFILIATION_GATE_VERSION,
+        institutionNames: {
+            fullName: institution.fullName.trim(),
+            acronym: institution.acronym.trim(),
+            emailDomains: sorted(institution.emailDomains),
+            alternateNames: sorted(institution.alternateNames),
+            excludedNames: sorted(institution.excludedNames),
+        },
+    };
 }

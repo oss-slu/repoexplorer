@@ -38,51 +38,27 @@ export const AFFILIATION_SCORE_RUBRIC = [
     '- not_supported decisions use 0.00 to 0.30, lower when the mention is clearly incidental.',
 ].join('\n');
 
-/**
- * Experimental prompt version: v3 plus the institution's excluded names and a
- * rule about same-name institutions and acronyms used in another sense.
- */
-export const DISAMBIGUATION_PROMPT_VERSION = 'v4';
-
-/** Added to the affiliation rules in prompt version v4. */
-export const AFFILIATION_DISAMBIGUATION_RULE =
-    '- Other institutions, campuses, and terms can share the target institution\'s name or acronym. Text about an institution listed in notThisInstitution, a different organization with the same acronym, or the acronym used as a technical term is not evidence for the target institution; when the passage does not show which one is meant, use uncertain.';
-
 const DEFAULT_AFFILIATION_DEFINITION =
     'Include documented institutional projects, research groups, coursework, and student organizations. Include a maintainer relationship only when supplied evidence explicitly establishes it. Do not infer official ownership from a university connection. Treat incidental references, citations, dependency usage, and ambiguous acronym matches as insufficient to establish affiliation. Missing profile information is missing evidence, not proof of non-affiliation. Use uncertain when the supplied evidence cannot support a defensible conclusion.';
 
 function usesV2Layout(configuration: ClassificationConfiguration): boolean {
     return (
         (configuration.promptVersion === 'v2' ||
-            configuration.promptVersion === SCORE_RUBRIC_PROMPT_VERSION ||
-            configuration.promptVersion === DISAMBIGUATION_PROMPT_VERSION) &&
+            configuration.promptVersion === SCORE_RUBRIC_PROMPT_VERSION) &&
         configuration.citationMode === 'exact_quote'
     );
 }
 
 function includesScoreRubric(configuration: ClassificationConfiguration): boolean {
-    return (
-        configuration.promptVersion === SCORE_RUBRIC_PROMPT_VERSION ||
-        configuration.promptVersion === DISAMBIGUATION_PROMPT_VERSION
-    );
+    return configuration.promptVersion === SCORE_RUBRIC_PROMPT_VERSION;
 }
 
-function includesDisambiguation(configuration: ClassificationConfiguration): boolean {
-    return configuration.promptVersion === DISAMBIGUATION_PROMPT_VERSION;
-}
-
-function institutionContextFor(
-    institution: UniversityConfiguration,
-    configuration: ClassificationConfiguration,
-) {
+function institutionContextFor(institution: UniversityConfiguration) {
     return {
         name: institution.fullName,
         acronym: institution.acronym,
         emailDomains: institution.emailDomains ?? [],
         additionalQueries: institution.additionalQueries ?? [],
-        ...(includesDisambiguation(configuration)
-            ? { notThisInstitution: institution.excludedNames ?? [] }
-            : {}),
         definition: institution.affiliationDefinition ?? DEFAULT_AFFILIATION_DEFINITION,
     };
 }
@@ -99,7 +75,7 @@ export function buildAffiliationPrompt(
     if (usesV2Layout(configuration)) {
         return buildAffiliationPromptV2(institution, evidence, configuration);
     }
-    const institutionContext = institutionContextFor(institution, configuration);
+    const institutionContext = institutionContextFor(institution);
     return [
         {
             role: 'system',
@@ -145,7 +121,6 @@ export function buildAffiliationPrompt(
                 '- A student team is student_organization only when the passage explicitly links the team to the institution. A name or acronym match alone is insufficient.',
                 '- A citation to or dependency on a research group does not establish that the repository belongs to that group; require explicit project or group ownership evidence.',
                 '- Evidence naming another institution does not support this target. An unresolved acronym or unclear institution match is uncertain, not a guessed owner mapping.',
-                ...(includesDisambiguation(configuration) ? [AFFILIATION_DISAMBIGUATION_RULE] : []),
                 ...(includesScoreRubric(configuration) ? [AFFILIATION_SCORE_RUBRIC] : []),
                 optionsForCitationMode(configuration.citationMode, 'affiliation').user,
                 `Required JSON schema:\n${JSON.stringify(schemaForTask('affiliation', configuration.citationMode))}`,
@@ -221,7 +196,7 @@ function buildAffiliationPromptV2(
     evidence: PreparedRepositoryEvidence,
     configuration: ClassificationConfiguration,
 ): PromptMessage[] {
-    const institutionContext = institutionContextFor(institution, configuration);
+    const institutionContext = institutionContextFor(institution);
     return [
         {
             role: 'system',
@@ -251,7 +226,6 @@ function buildAffiliationPromptV2(
                 '- A README citation to “Target Institute Research Report (2024)” alone is an incidental mention, not an affiliation.',
                 '- A repository named “slu-parser” with no matching context has an ambiguous acronym; use uncertain.',
                 '- Missing owner profile details or an empty README are missing evidence; use uncertain rather than claiming non-affiliation.',
-                ...(includesDisambiguation(configuration) ? [AFFILIATION_DISAMBIGUATION_RULE] : []),
                 ...(includesScoreRubric(configuration) ? [AFFILIATION_SCORE_RUBRIC] : []),
                 `Required JSON schema:\n${JSON.stringify(AFFILIATION_RESPONSE_SCHEMA)}`,
             ].join('\n\n'),

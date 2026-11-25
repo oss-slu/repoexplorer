@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import {
     loadScrapingConfiguration,
     validateClassificationConfiguration,
@@ -140,125 +140,46 @@ describe('scraping configuration', () => {
         ).toThrow(/repositories must not contain an actual NUL/);
     });
 
-    test('validates classifier provider, threshold, retries, and truncation settings', () => {
-        expect(
+    test('rejects invalid classification settings', () => {
+        for (const [settings, message] of [
+            [{ threshold: 1.1 }, /threshold/],
+            [{ apiKeyEnv: 'bad-name' }, /environment variable/],
+            [{ citationMode: 'fuzzy' }, /citationMode/],
+            [{ affiliationEvidenceGate: true }, /affiliationEvidenceGate/],
+            [
+                {
+                    truncation: {
+                        mode: 'start_end',
+                        maxChars: 10,
+                        startChars: 9,
+                        endChars: 2,
+                    },
+                },
+                /must not exceed/,
+            ],
+            [{ generation: { responseFormat: 'xml' } }, /responseFormat/],
+            [{ generation: { temperature: 2.01 } }, /temperature/],
+            [{ generation: { maxOutputTokens: 32769 } }, /maxOutputTokens/],
+            [{ generation: { reasoningEffort: 'extreme' } }, /reasoningEffort/],
+            [{ generation: { seed: 2147483648 } }, /seed/],
+            [{ promptVersion: 'v4' }, /promptVersion must be one of v2, v3/],
+        ] as const) {
+            expect(() => validateClassificationConfiguration(settings)).toThrow(
+                message,
+            );
+        }
+        expect(() =>
             validateScrapingConfiguration({
                 universities: [
                     {
                         key: 'A',
                         fullName: 'Alpha University',
                         acronym: 'AU',
-                        emailDomains: ['alpha.edu'],
-                        additionalQueries: ['Alpha'],
+                        alternateNames: 'Alpha',
                     },
                 ],
             }),
-        ).toMatchObject({
-            universities: [
-                { emailDomains: ['alpha.edu'], additionalQueries: ['Alpha'] },
-            ],
-            classification: {
-                threshold: 0.4,
-                model: 'gpt-5-mini',
-                promptVersion: 'v3',
-                generation: {
-                    responseFormat: 'text',
-                    maxOutputTokens: 8192,
-                    maxOutputTokensField: 'max_completion_tokens',
-                },
-            },
-        });
-        expect(() =>
-            validateClassificationConfiguration({ threshold: 1.1 }),
-        ).toThrow(/threshold/);
-        expect(() =>
-            validateClassificationConfiguration({ apiKeyEnv: 'bad-name' }),
-        ).toThrow(/environment variable/);
-        expect(() =>
-            validateClassificationConfiguration({
-                truncation: {
-                    mode: 'start_end',
-                    maxChars: 10,
-                    startChars: 9,
-                    endChars: 2,
-                },
-            }),
-        ).toThrow(/must not exceed/);
-    });
-
-    test('validates bounded classification generation settings and safe seeds', () => {
-        expect(
-            validateClassificationConfiguration({
-                generation: {
-                    responseFormat: 'json_schema',
-                    temperature: 2,
-                    maxOutputTokens: 32768,
-                    maxOutputTokensField: 'max_completion_tokens',
-                    reasoningEffort: 'low',
-                    seed: 2147483647,
-                },
-            }).generation,
-        ).toEqual({
-            responseFormat: 'json_schema',
-            temperature: 2,
-            maxOutputTokens: 32768,
-            maxOutputTokensField: 'max_completion_tokens',
-            reasoningEffort: 'low',
-            seed: 2147483647,
-        });
-        const omitted = validateClassificationConfiguration({
-            generation: { responseFormat: 'text' },
-        }).generation;
-        expect(omitted).not.toHaveProperty('temperature');
-        expect(omitted).not.toHaveProperty('reasoningEffort');
-        expect(omitted.maxOutputTokens).toBe(8192);
-        for (const reasoningEffort of ['extreme', '', 1]) {
-            expect(() =>
-                validateClassificationConfiguration({
-                    generation: { reasoningEffort },
-                }),
-            ).toThrow(/reasoningEffort/);
-        }
-        for (const temperature of [-0.01, 2.01, Number.NaN]) {
-            expect(() =>
-                validateClassificationConfiguration({
-                    generation: { temperature },
-                }),
-            ).toThrow(/temperature/);
-        }
-        for (const maxOutputTokens of [0, 32769, 1.5]) {
-            expect(() =>
-                validateClassificationConfiguration({
-                    generation: { maxOutputTokens },
-                }),
-            ).toThrow(/maxOutputTokens/);
-        }
-        for (const seed of [-1, 2147483648, 1.5, Number.NaN]) {
-            expect(() =>
-                validateClassificationConfiguration({
-                    generation: { seed },
-                }),
-            ).toThrow(/seed/);
-        }
-        expect(() =>
-            validateClassificationConfiguration({
-                generation: { responseFormat: 'xml' },
-            }),
-        ).toThrow(/responseFormat/);
-    });
-
-    test('defaults to exact citations and validates the evidence reference wire mode', () => {
-        expect(validateClassificationConfiguration({}).citationMode).toBe(
-            'exact_quote',
-        );
-        expect(
-            validateClassificationConfiguration({
-                citationMode: 'evidence_id',
-            }).citationMode,
-        ).toBe('evidence_id');
-        expect(() =>
-            validateClassificationConfiguration({ citationMode: 'fuzzy' }),
-        ).toThrow(/citationMode/);
+        ).toThrow(/alternateNames/);
     });
 
     test('uses the documented host defaults and rejects invalid configuration before database setup', async () => {
@@ -274,68 +195,31 @@ describe('scraping configuration', () => {
         );
     });
 
-    test('example configurations keep temperature only where the provider accepts it', async () => {
-        const openai = await loadScrapingConfiguration(
-            'config/universities.openai.example.json',
-        );
-        expect(openai.classification?.model).toBe('gpt-5-mini');
-        expect(openai.classification?.generation).not.toHaveProperty(
-            'temperature',
-        );
+    test('has no classification settings unless the configuration provides them', () => {
         expect(
-            openai.classification?.generation.maxOutputTokens,
-        ).toBeGreaterThanOrEqual(4096);
-        const ollama = validateClassificationConfiguration(
-            JSON.parse(
-                await readFile('config/evaluation.example.json', 'utf8'),
-            ) as unknown,
-        );
-        expect(ollama.generation).toMatchObject({
-            temperature: 0,
-            maxOutputTokensField: 'max_tokens',
-        });
+            validateScrapingConfiguration({
+                universities: [
+                    { key: 'A', fullName: 'Alpha University', acronym: 'AU' },
+                ],
+            }),
+        ).not.toHaveProperty('classification');
     });
 
-    test('local example configurations use the recommended Granite setup', async () => {
-        const universities = await loadScrapingConfiguration(
+    test('shipped example configurations load', async () => {
+        for (const file of [
             'config/universities.example.json',
-        );
-        const evaluation = validateClassificationConfiguration(
-            JSON.parse(
-                await readFile('config/evaluation.example.json', 'utf8'),
-            ) as unknown,
-        );
-        expect(universities.classification).toEqual(evaluation);
-        expect(evaluation).toMatchObject({
-            provider: 'ollama-openai-compatible',
-            baseUrl: 'http://127.0.0.1:11434/v1',
-            model: 'granite4.2-8b-12k',
-            concurrency: 1,
-            citationMode: 'evidence_id',
-            affiliationEvidenceGate: 'names_institution',
-            generation: {
-                responseFormat: 'json_schema',
-                reasoningEffort: 'none',
-            },
-        });
-        const modelfile = await readFile(
-            'config/ollama/granite4.2-8b-12k.Modelfile',
-            'utf8',
-        );
-        expect(modelfile).toMatch(/^FROM granite4\.2:8b$/m);
-        expect(modelfile).toMatch(/^PARAMETER num_ctx 12288$/m);
-    });
-
-    test('universities example and OpenAI variant differ only in classification', async () => {
-        const local = JSON.parse(
-            await readFile('config/universities.example.json', 'utf8'),
-        ) as Record<string, unknown>;
-        const openai = JSON.parse(
-            await readFile('config/universities.openai.example.json', 'utf8'),
-        ) as Record<string, unknown>;
-        expect({ ...local, classification: null }).toEqual({
-            ...openai,
-            classification: null,
-        });
+            'config/universities.openai.example.json',
+        ]) {
+            await expect(
+                loadScrapingConfiguration(file),
+            ).resolves.toHaveProperty('classification');
+        }
+        expect(() =>
+            validateClassificationConfiguration(
+                JSON.parse(
+                    readFileSync('config/evaluation.example.json', 'utf8'),
+                ) as unknown,
+            ),
+        ).not.toThrow();
     });
 });

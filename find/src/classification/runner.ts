@@ -341,7 +341,10 @@ async function classifyAffiliation(
         candidate,
         prepared,
         dependencies,
-        affiliationGatePolicy(dependencies.configuration.affiliationEvidenceGate),
+        affiliationGatePolicy(
+            dependencies.configuration.affiliationEvidenceGate,
+            university,
+        ),
     );
     try {
         const existing = await dependencies.store.findPrediction(key);
