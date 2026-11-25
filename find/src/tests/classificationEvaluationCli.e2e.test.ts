@@ -71,9 +71,10 @@ function startModelServer() {
                         },
                     }),
                 );
-            } catch (error) {
+            } catch {
+                // Fail the request fast without echoing error details.
                 response.statusCode = 500;
-                response.end(String(error));
+                response.end('stand-in server error');
             }
         });
     });
