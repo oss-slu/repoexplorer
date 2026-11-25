@@ -1,4 +1,9 @@
-import { validateScrapingConfiguration } from '../config';
+import { readFileSync } from 'node:fs';
+import {
+    loadScrapingConfiguration,
+    validateClassificationConfiguration,
+    validateScrapingConfiguration,
+} from '../config';
 import { parseCliArguments, parseCliOptions, runCli } from '../cli';
 import { getDatabasePoolConfig } from '../db/connect';
 
@@ -113,7 +118,11 @@ describe('scraping configuration', () => {
         expect(() =>
             validateScrapingConfiguration({
                 universities: [
-                    { key: 'University\u0000', fullName: 'University', acronym: 'U' },
+                    {
+                        key: 'University\u0000',
+                        fullName: 'University',
+                        acronym: 'U',
+                    },
                 ],
             }),
         ).toThrow(/key must not contain an actual NUL/);
@@ -131,6 +140,48 @@ describe('scraping configuration', () => {
         ).toThrow(/repositories must not contain an actual NUL/);
     });
 
+    test('rejects invalid classification settings', () => {
+        for (const [settings, message] of [
+            [{ threshold: 1.1 }, /threshold/],
+            [{ apiKeyEnv: 'bad-name' }, /environment variable/],
+            [{ citationMode: 'fuzzy' }, /citationMode/],
+            [{ affiliationEvidenceGate: true }, /affiliationEvidenceGate/],
+            [
+                {
+                    truncation: {
+                        mode: 'start_end',
+                        maxChars: 10,
+                        startChars: 9,
+                        endChars: 2,
+                    },
+                },
+                /must not exceed/,
+            ],
+            [{ generation: { responseFormat: 'xml' } }, /responseFormat/],
+            [{ generation: { temperature: 2.01 } }, /temperature/],
+            [{ generation: { maxOutputTokens: 32769 } }, /maxOutputTokens/],
+            [{ generation: { reasoningEffort: 'extreme' } }, /reasoningEffort/],
+            [{ generation: { seed: 2147483648 } }, /seed/],
+            [{ promptVersion: 'v4' }, /promptVersion must be one of v2, v3/],
+        ] as const) {
+            expect(() => validateClassificationConfiguration(settings)).toThrow(
+                message,
+            );
+        }
+        expect(() =>
+            validateScrapingConfiguration({
+                universities: [
+                    {
+                        key: 'A',
+                        fullName: 'Alpha University',
+                        acronym: 'AU',
+                        alternateNames: 'Alpha',
+                    },
+                ],
+            }),
+        ).toThrow(/alternateNames/);
+    });
+
     test('uses the documented host defaults and rejects invalid configuration before database setup', async () => {
         expect(
             getDatabasePoolConfig({
@@ -142,5 +193,33 @@ describe('scraping configuration', () => {
         await expect(runCli(['--config', 'package.json'])).rejects.toThrow(
             /universities array/,
         );
+    });
+
+    test('has no classification settings unless the configuration provides them', () => {
+        expect(
+            validateScrapingConfiguration({
+                universities: [
+                    { key: 'A', fullName: 'Alpha University', acronym: 'AU' },
+                ],
+            }),
+        ).not.toHaveProperty('classification');
+    });
+
+    test('shipped example configurations load', async () => {
+        for (const file of [
+            'config/universities.example.json',
+            'config/universities.openai.example.json',
+        ]) {
+            await expect(
+                loadScrapingConfiguration(file),
+            ).resolves.toHaveProperty('classification');
+        }
+        expect(() =>
+            validateClassificationConfiguration(
+                JSON.parse(
+                    readFileSync('config/evaluation.example.json', 'utf8'),
+                ) as unknown,
+            ),
+        ).not.toThrow();
     });
 });

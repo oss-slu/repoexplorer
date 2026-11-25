@@ -1,0 +1,37 @@
+{
+    "repositoryConcurrency": 4,
+    "databaseBatchSize": 100,
+    "classification": {
+        "provider": "openai-compatible",
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-5-mini",
+        "apiKeyEnv": "OPENAI_API_KEY",
+        "threshold": 0.4,
+        "concurrency": 4,
+        "timeoutMs": 60000,
+        "maxRetries": 3,
+        "promptVersion": "v3",
+        "affiliationEvidenceGate": "names_institution",
+        "generation": {
+            "responseFormat": "text",
+            "maxOutputTokens": 8192,
+            "maxOutputTokensField": "max_completion_tokens"
+        },
+        "truncation": {
+            "mode": "start_end",
+            "maxChars": 20000,
+            "startChars": 15000,
+            "endChars": 5000
+        }
+    },
+    "universities": [
+        {
+            "key": "Saint Louis University",
+            "fullName": "Saint Louis University",
+            "acronym": "SLU",
+            "excludedNames": ["Saint Louis University Baguio"],
+            "emailDomains": ["slu.edu"],
+            "additionalQueries": []
+        }
+    ]
+}

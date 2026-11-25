@@ -403,7 +403,7 @@ export async function runCli(
                     ? `PARTIAL; ${university.skippedOwners.length} owners skipped, ${university.skippedRepositories.length} repositories skipped, ${university.warnings.length} text warnings; `
                     : '';
             output.write(
-                `${sanitizeDiagnosticText(university.university)}: ${coverage}${university.discovered} unique repositories; ${university.committed} committed\n`,
+                `${sanitizeDiagnosticText(university.university)}: ${coverage}${university.discovered} unique repositories; ${university.committed} committed; ${university.unchanged} unchanged\n`,
             );
         }
         for (const failure of result.failures) {
@@ -711,7 +711,7 @@ export function formatCliSummary(
                 : result.partial > 0
                   ? 'PARTIAL COMPLETION'
                   : 'COMPLETED';
-    return `${label} in ${formatDuration(result.elapsedMs)}. Universities processed: ${result.universitiesProcessed}/${universityCount}; complete: ${result.results.length - result.partial}; partial: ${result.partial}; failed: ${result.failed}; interrupted: ${result.interrupted}; not run: ${result.outcomes.filter((outcome) => outcome.status === 'not_run').length}; skipped owners: ${skippedOwners}; skipped repositories: ${skippedRepositories}; text warnings: ${warnings}; repository associations committed: ${result.committed}; policy: ${policy}; report: ${reportPath ?? 'UNAVAILABLE (report write failed)'}\n`;
+    return `${label} in ${formatDuration(result.elapsedMs)}. Universities processed: ${result.universitiesProcessed}/${universityCount}; complete: ${result.results.length - result.partial}; partial: ${result.partial}; failed: ${result.failed}; interrupted: ${result.interrupted}; not run: ${result.outcomes.filter((outcome) => outcome.status === 'not_run').length}; skipped owners: ${skippedOwners}; skipped repositories: ${skippedRepositories}; text warnings: ${warnings}; repository associations committed: ${result.committed}; repositories unchanged: ${result.unchanged}; policy: ${policy}; report: ${reportPath ?? 'UNAVAILABLE (report write failed)'}\n`;
 }
 
 export function writeImmediateCliFailure(

@@ -83,6 +83,7 @@ type RunnerProgressEvent =
           completed: number;
           total: number;
           skipped?: number;
+          unchanged?: number;
           warnings?: number;
           label?: string;
       };
@@ -236,6 +237,10 @@ export async function runCollection(
             (total, result) => total + result.committed,
             0,
         ),
+        unchanged: results.reduce(
+            (total, result) => total + result.unchanged,
+            0,
+        ),
         failed: failures.length,
         interrupted: outcomes.filter((outcome) => outcome.status === 'interrupted').length,
         partial: results.filter((result) => result.status === 'partial').length,
@@ -336,6 +341,9 @@ async function collectUniversity(
     let skippedRepositoryCount = candidates.filter(
         (item) => item.status === 'skipped',
     ).length;
+    let unchangedRepositoryCount = candidates.filter(
+        (item) => item.status === 'unchanged',
+    ).length;
     const warnings = candidates.flatMap((item) => item.warnings ?? []);
     observed.discovered = checkpoint.discovered;
     observed.skippedOwners.push(...checkpoint.skippedOwners);
@@ -349,6 +357,7 @@ async function collectUniversity(
         completed,
         total: candidates.length,
         skipped: skippedRepositoryCount,
+        unchanged: unchangedRepositoryCount,
         warnings: warnings.length,
     });
 
@@ -398,6 +407,7 @@ async function collectUniversity(
                             },
                         );
                         completed += 1;
+                        unchangedRepositoryCount += 1;
                         emit({
                             type: 'progress',
                             phase: 'enrichment',
@@ -405,6 +415,7 @@ async function collectUniversity(
                             completed,
                             total: candidates.length,
                             skipped: skippedRepositoryCount,
+                            unchanged: unchangedRepositoryCount,
                             warnings: warnings.length,
                             label: `${candidate.fullName} (unchanged)`,
                         });
@@ -464,6 +475,7 @@ async function collectUniversity(
                         completed,
                         total: candidates.length,
                         skipped: skippedRepositoryCount,
+                        unchanged: unchangedRepositoryCount,
                         warnings: warnings.length,
                         label: candidate.fullName,
                     });
@@ -490,6 +502,7 @@ async function collectUniversity(
                             completed,
                             total: candidates.length,
                             skipped: skippedRepositoryCount,
+                            unchanged: unchangedRepositoryCount,
                             warnings: warnings.length,
                             label: `${candidate.fullName} (skipped)`,
                         });
@@ -645,6 +658,9 @@ function resultFromCheckpoint(
         university,
         discovered: checkpoint.discovered,
         committed: checkpoint.committed,
+        unchanged: checkpoint.candidates.filter(
+            (candidate) => candidate.status === 'unchanged',
+        ).length,
         skippedOwners: checkpoint.skippedOwners,
         skippedRepositories: checkpoint.skippedRepositories,
         warnings: checkpoint.warnings,
