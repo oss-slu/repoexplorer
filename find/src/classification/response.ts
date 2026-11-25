@@ -346,10 +346,8 @@ function parseEvidence<Field extends string>(
 }
 
 function parseObject(value: string): Record<string, unknown> {
-    const stripped = value
-        .trim()
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```$/, '');
+    let stripped = value.trim().replace(/^```(?:json)?\s*/i, '');
+    if (stripped.endsWith('```')) stripped = stripped.slice(0, -3).trimEnd();
     let parsed: unknown;
     try {
         parsed = JSON.parse(stripped);

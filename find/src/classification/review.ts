@@ -194,7 +194,7 @@ export function quoteNamesInstitution(
 function loginTokens(login: string): string[] {
     return login
         .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+        .replace(/([A-Z])(?=[A-Z][a-z])/g, '$1 ')
         .toLowerCase()
         .split(/[^a-z0-9]+/)
         .filter((token) => token !== '');
