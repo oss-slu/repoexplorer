@@ -269,6 +269,7 @@ h1 {
 
 .data-table__title{
     text-align: left;
+    font-size: 1.17rem;
 }
 
 .data-table__search {
@@ -303,10 +304,11 @@ h1 {
     min-width: 100%;
     table-layout: fixed;
     border-collapse: collapse;
+    border: 1px solid #e0e3e6;
 }
 
 .data-table__table thead tr {
-    border-bottom: 2px solid #ddd;
+    border-bottom: 1px solid #ddd;
 }
 
 .data-table__header {
@@ -314,12 +316,13 @@ h1 {
     position: sticky;
     top: 0;
     z-index: 2;
-    background-color: #e9ecef;
+    background-color: #f8f9fa;
     text-align: center;
+    font-weight: 500;
 }
 
 .data-table__row {
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid #e0e3e6;
 }
 
 .data-table__row--clickable {
@@ -332,6 +335,23 @@ h1 {
     word-break: break-word;
     vertical-align: top;
     box-sizing: border-box;
+}
+
+.data-table__table .data-table__cell:first-child {
+    text-align: left;
+}
+
+.data-table__table .data-table__cell:not(:first-child) {
+    text-align: right;
+}
+
+.data-table__table .data-table__header:not(:last-child),
+.data-table__table .data-table__cell:not(:last-child) {
+    border-right: 1px solid #e0e3e6;
+}
+
+.data-table__table thead .data-table__header {
+    text-align: center;
 }
 
 .data-table__row-message {
