@@ -41,6 +41,8 @@ export default function DataTable({
     const tableContainerRef = useRef<HTMLDivElement>(null);
     const loadingMoreRef = useRef(false);
     const isRepoBrowse = endpoint === 'overview/repositories';
+    const isSecurityScorecard = endpoint === 'security/securityScorecardByRepo';
+    const isPaginatedTable = isRepoBrowse || isSecurityScorecard;
 
     const COLUMN_WIDTHS: Record<string, string> = {
         name: '180px',
@@ -108,7 +110,7 @@ export default function DataTable({
         }
 
         const controller = new AbortController();
-        const isFirstPage = !isRepoBrowse || repoOffset === 0;
+        const isFirstPage = !isPaginatedTable || repoOffset === 0;
 
         const fetchData = async () => {
             try {
@@ -124,7 +126,7 @@ export default function DataTable({
                 }
 
                 const params = new URLSearchParams(queryParams);
-                if (isRepoBrowse) {
+                if (isPaginatedTable) {
                     params.set('limit', String(REPO_PAGE_SIZE));
                     params.set('offset', String(repoOffset));
                 }
@@ -138,7 +140,7 @@ export default function DataTable({
                 const pageRequest = fetch(url, {signal: controller.signal });
 
                 const countRequest =
-                    isRepoBrowse && repoOffset === 0
+                    isPaginatedTable && repoOffset === 0
                         ? fetch(
                             `${API_URL}/${endpoint}/count${
                                 queryParams ? `?${queryParams}` : ''
@@ -158,7 +160,7 @@ export default function DataTable({
 
                 if (countResp) {
                     if (!countResp.ok) {
-                        throw new Error(`Error fetching repository count: ${countResp.status}`)
+                        throw new Error(`Error fetching row count: ${countResp.status}`)
                     }
 
                     const countJson: { totalCount?: unknown } = await countResp.json();
@@ -184,12 +186,12 @@ export default function DataTable({
                     : (Object.values(json)[0] as Record<string, unknown>[]);
 
                 setData((currentData) =>
-                    isRepoBrowse && repoOffset > 0
+                    isPaginatedTable && repoOffset > 0
                     ?[...currentData, ...arr]
                     : arr,
                 );
 
-                if (isRepoBrowse) {
+                if (isPaginatedTable) {
                     setHasMoreRepos(arr.length === REPO_PAGE_SIZE);
                 }
             } catch (err) {
@@ -216,11 +218,11 @@ export default function DataTable({
             controller.abort();
             loadingMoreRef.current = false;
         }
-    }, [endpoint, queryParams, isRepoBrowse, repoOffset, requestKey]);
+    }, [endpoint, queryParams, isPaginatedTable, repoOffset, requestKey]);
 
     useEffect(() => {
         if (
-            !isRepoBrowse ||
+            !isPaginatedTable ||
             !hasMoreRepos ||
             loading ||
             loadingMore ||
@@ -245,7 +247,7 @@ export default function DataTable({
     }, [
         data.length,
         hasMoreRepos,
-        isRepoBrowse,
+        isPaginatedTable,
         loading,
         loadingMore,
         scrollTop,
@@ -340,7 +342,7 @@ export default function DataTable({
     });
 
     const rowCount =
-        isRepoBrowse && totalRepoCount !== null
+        isPaginatedTable && totalRepoCount !== null
             ? totalRepoCount
             : filteredData.length;
 
@@ -537,7 +539,7 @@ export default function DataTable({
                 </div>
             )}
 
-            {loadingMore && <p>Loading more repositories...</p>}
+            {loadingMore && <p>Loading more rows...</p>}
             {error && data.length > 0 && (
                 <p>Failed to load {title}: {error}</p>
             )}

@@ -197,5 +197,146 @@ describe('DataTable', () => {
                 Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
             }
         }
-    })
+    });
+
+    
+    it('shows full security scorecard count when only first page loaded', async () => {
+        const firstPage = Array.from({ length: 500 }, (_, index) => ({
+                htmlUrl: `https://github.com/example/repo-${index + 1}`,
+                totalScore: 8,
+        }));
+
+        globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+            const url = new URL(String(input), 'http://localhost');
+
+            if (url.pathname.endsWith('/count')) {
+                return {
+                    ok: true,
+                    json: async () => ({ totalCount: 501 }),
+                } as Response;
+            }
+
+            return {
+                ok: true,
+                json: async () => ({
+                    securityScorecardByRepo: firstPage,
+                }),
+            } as Response;
+        }) as typeof fetch;
+
+        render(
+            <DataTable
+                title="Security scorecard"
+                endpoint="security/securityScorecardByRepo"
+                scrollable
+                showRowMessage
+            />,
+        );
+
+        expect(await screen.findByText(/of 501/)).toBeInTheDocument();
+        expect(await screen.findByText('https://github.com/example/repo-500')).toBeInTheDocument();
+    });
+
+    it('loads next 500 rows on security scorecard when scrolling near bottom', async () => {
+        const firstPage = Array.from({ length: 500 }, (_, index) => ({
+            htmlUrl: `https://github.com/example/repo-${index + 1}`,
+            totalScore: 8,
+        }));
+        const secondPage = [{
+            htmlUrl: 'https://github.com/example/repo-501',
+            totalScore: 8,
+        }];
+
+        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+            const url = new URL(String(input), 'http://localhost');
+
+            if (url.pathname.endsWith('/count')) {
+                return {
+                    ok: true,
+                    json: async () => ({ totalCount: 501 }),
+                } as Response;
+            }
+
+            const rows =
+                url.searchParams.get('offset') === '0' ? firstPage: secondPage;
+
+            return {
+                ok: true,
+                json: async () => ({ securityScorecardByRepo: rows }),
+            } as Response;
+        });
+
+        globalThis.fetch = fetchMock as typeof fetch;
+
+        const originalClientHeight = Object.getOwnPropertyDescriptor(
+            HTMLElement.prototype,
+            'clientHeight',
+        );
+
+        const originalScrollHeight = Object.getOwnPropertyDescriptor(
+            HTMLElement.prototype,
+            'scrollHeight',
+        );
+
+        Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+            configurable: true,
+            value: 500,
+        });
+
+        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+            configurable: true,
+            value: 2000,
+        });
+
+        try {
+            render(
+                <DataTable
+                    title="Security scorecard"
+                    endpoint="security/securityScorecardByRepo"
+                    scrollable
+                    showRowMessage={false}
+                />,
+            );
+            expect(await screen.findByText('https://github.com/example/repo-1')).toBeInTheDocument();
+
+            const container = screen.getByRole('table').parentElement!;
+            container.scrollTop = 1600;
+            fireEvent.scroll(container);
+
+            expect(
+                await screen.findByText('https://github.com/example/repo-501'),
+            ).toBeInTheDocument();
+
+            const requestedUrls = fetchMock.mock.calls
+                .map(([input]) => new URL(String(input), 'http://localhost'))
+                .filter((url) => !url.pathname.endsWith('/count'));
+
+            expect(requestedUrls).toHaveLength(2);
+            expect(requestedUrls[0].searchParams.get('limit')).toBe('500');
+            expect(requestedUrls[0].searchParams.get('offset')).toBe('0');
+            expect(requestedUrls[1].searchParams.get('limit')).toBe('500');
+            expect(requestedUrls[1].searchParams.get('offset')).toBe('500');
+        } finally {
+            if(originalClientHeight) {
+                Object.defineProperty(
+                    HTMLElement.prototype,
+                    'clientHeight',
+                    originalClientHeight,
+                );
+            } else {
+                Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
+            }
+
+            if (originalScrollHeight) {
+                Object.defineProperty(
+                    HTMLElement.prototype,
+                    'scrollHeight',
+                    originalScrollHeight,
+                );
+            } else {
+                Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+            }
+        }
+    });
+    
 });
